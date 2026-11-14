@@ -54,7 +54,7 @@ describe('filterEnv', () => {
   it('drops ELECTRON_*, NODE_OPTIONS and Vite/dev variables, sets TERM', () => {
     const env = filterEnv({
       HOME: '/h', PATH: '/bin', TERM: 'dumb', ELECTRON_RUN_AS_NODE: '1', ELECTRON_RENDERER_URL: 'http://x',
-      NODE_OPTIONS: '--inspect', VITE_FOO: '1', AGENT_CANVAS_USER_DATA: '/t', UNSET: undefined,
+      NODE_OPTIONS: '--inspect', VITE_FOO: '1', NODSHELL_USER_DATA: '/t', UNSET: undefined,
     })
     expect(env).toEqual({ HOME: '/h', PATH: '/bin', TERM: 'xterm-256color' })
   })

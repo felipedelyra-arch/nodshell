@@ -8,7 +8,7 @@ import { SqliteSettingsRepo } from '../../src/main/infrastructure/db/settings'
 let dir: string
 let db: Db
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'agent-canvas-settings-'))
+  dir = mkdtempSync(join(tmpdir(), 'nodshell-settings-'))
   db = openDatabase(join(dir, 'test.db'))
 })
 afterEach(() => {

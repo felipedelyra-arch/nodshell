@@ -11,7 +11,7 @@ let dir: string
 let file: string
 let db: Db
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'agent-canvas-db-'))
+  dir = mkdtempSync(join(tmpdir(), 'nodshell-db-'))
   file = join(dir, 'test.db')
   db = openDatabase(file)
 })

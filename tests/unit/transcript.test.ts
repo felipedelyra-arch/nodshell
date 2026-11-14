@@ -136,10 +136,10 @@ describe('hasTranscript (resume only a session that has a conversation)', () => 
     const root = mkdtempSync(join(tmpdir(), 'has-transcript-'))
     const projects = join(root, 'projects')
     const sid = '9d1c2b3a-4e5f-4a6b-8c7d-0e1f2a3b4c5d'
-    const cwd = '/home/u/.config/agent canvas/worktrees/ab12/frontend-1'
+    const cwd = '/home/u/.config/nodshell/worktrees/ab12/frontend-1'
     expect(hasTranscript(projects, cwd, sid)).toBe(false)
-    mkdirSync(join(projects, '-home-u--config-agent-canvas-worktrees-ab12-frontend-1'), { recursive: true })
-    writeFileSync(join(projects, '-home-u--config-agent-canvas-worktrees-ab12-frontend-1', `${sid}.jsonl`), '{}\n')
+    mkdirSync(join(projects, '-home-u--config-nodshell-worktrees-ab12-frontend-1'), { recursive: true })
+    writeFileSync(join(projects, '-home-u--config-nodshell-worktrees-ab12-frontend-1', `${sid}.jsonl`), '{}\n')
     expect(hasTranscript(projects, cwd, sid)).toBe(true)
     expect(hasTranscript(projects, cwd, '../../etc/passwd')).toBe(false)
     expect(hasTranscript(projects, 'relative/frontend-1', sid)).toBe(false)

@@ -42,7 +42,7 @@ async function startIdleLoop(details: ReturnType<Page['getByRole']>, name: strin
 test('acceptance: an idle loop fires by itself in a resting agent and stops by itself when the reply has the goal', async () => {
   test.setTimeout(120_000)
   const r = setupRepo()
-  const { app, page, errors } = await launch({ ...r.env, AGENT_CANVAS_TEST_LOOP_MS: LOOP_MS })
+  const { app, page, errors } = await launch({ ...r.env, NODSHELL_TEST_LOOP_MS: LOOP_MS })
   try {
     const name = await oneAgent(page)
     const run = r.runs()[0]!
@@ -73,7 +73,7 @@ test('acceptance: an idle loop fires by itself in a resting agent and stops by i
 test('Pause all keeps a loop from firing until Resume all; max runs then pauses it', async () => {
   test.setTimeout(120_000)
   const r = setupRepo()
-  const { app, page, errors } = await launch({ ...r.env, AGENT_CANVAS_TEST_LOOP_MS: LOOP_MS })
+  const { app, page, errors } = await launch({ ...r.env, NODSHELL_TEST_LOOP_MS: LOOP_MS })
   try {
     const name = await oneAgent(page)
     const run = r.runs()[0]!
@@ -101,8 +101,8 @@ test('Pause all keeps a loop from firing until Resume all; max runs then pauses 
 test('quit and reopen brings the loop back paused ("Paused on reopen"); it only runs again when resumed', async () => {
   test.setTimeout(180_000)
   const r = setupRepo()
-  const home = tempDir('agent-canvas-e2e-home-')
-  const env = { ...r.env, HOME: home, AGENT_CANVAS_USER_DATA: join(home, 'userdata'), AGENT_CANVAS_TEST_RESTORE: 'resume', AGENT_CANVAS_TEST_LOOP_MS: LOOP_MS }
+  const home = tempDir('nodshell-e2e-home-')
+  const env = { ...r.env, HOME: home, NODSHELL_USER_DATA: join(home, 'userdata'), NODSHELL_TEST_RESTORE: 'resume', NODSHELL_TEST_LOOP_MS: LOOP_MS }
   let { app, page, errors } = await launch(env)
   let closed = false
   try {

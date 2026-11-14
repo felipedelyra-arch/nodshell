@@ -9,7 +9,7 @@ let dir: string
 let db: Db
 let repo: SqliteWebTileRepo
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'agent-canvas-tiles-'))
+  dir = mkdtempSync(join(tmpdir(), 'nodshell-tiles-'))
   db = openDatabase(join(dir, 'test.db'))
   repo = new SqliteWebTileRepo(db)
 })

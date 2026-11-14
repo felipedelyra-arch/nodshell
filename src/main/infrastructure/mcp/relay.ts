@@ -14,8 +14,8 @@ const quit = (code: number): never => process.exit(code)
 process.on('uncaughtException', () => quit(1))
 process.stdout.on('error', () => quit(0))
 
-const socketPath = process.env['AGENT_CANVAS_MCP_SOCKET']
-const token = process.env['AGENT_CANVAS_MCP_TOKEN']
+const socketPath = process.env['NODSHELL_MCP_SOCKET']
+const token = process.env['NODSHELL_MCP_TOKEN']
 if (!socketPath || !token) quit(1)
 
 const out = (o: unknown) => process.stdout.write(JSON.stringify(o) + '\n')

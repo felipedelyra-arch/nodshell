@@ -42,7 +42,7 @@ const sid = opt('session-id') || opt('resume') // like Claude Code, a resumed se
 const settings = opt('settings') ? JSON.parse(fs.readFileSync(opt('settings'), 'utf8')) : { hooks: {} }
 const transcript = path.join(process.env.HOME, '.claude', 'projects', process.cwd().replace(/[^a-zA-Z0-9]/g, '-'), sid + '.jsonl')
 const claudeEnv = Object.keys(process.env).filter((k) => /^CLAUDE/.test(k))
-fs.writeFileSync(path.join(LOG, pid + '.json'), JSON.stringify({ argv, cwd: process.cwd(), pid, claudeEnv, hookSocket: process.env.AGENT_CANVAS_HOOK_SOCKET }))
+fs.writeFileSync(path.join(LOG, pid + '.json'), JSON.stringify({ argv, cwd: process.cwd(), pid, claudeEnv, hookSocket: process.env.NODSHELL_HOOK_SOCKET }))
 // like Claude Code: nothing to resume without the session's transcript
 if (opt('resume') && !fs.existsSync(transcript)) {
   process.stdout.write('No conversation found with session ID ' + opt('resume') + '\\r\\n')
@@ -66,7 +66,7 @@ function fire(event, extra) {
 }
 const line = (o) => fs.appendFileSync(transcript, JSON.stringify({ sessionId: sid, ...o }) + '\\n')
 function mcpCall(tool, args) {
-  const server = JSON.parse(fs.readFileSync(opt('mcp-config'), 'utf8')).mcpServers['agent-canvas']
+  const server = JSON.parse(fs.readFileSync(opt('mcp-config'), 'utf8')).mcpServers['nodshell']
   return new Promise((done) => {
     const p = spawn(server.command, server.args, { env: { ...process.env, ...server.env }, stdio: ['pipe', 'pipe', 'ignore'] })
     let buf = ''
@@ -158,7 +158,7 @@ process.stdin.on('data', (b) => {
 }
 
 export function setupRepo() {
-  const work = tempDir('agent-canvas-e2e-repo-')
+  const work = tempDir('nodshell-e2e-repo-')
   const repo = join(work, 'demo repo')
   const bin = join(work, 'bin')
   const logs = join(work, 'logs')
@@ -171,7 +171,7 @@ export function setupRepo() {
   git('commit', '-q', '-m', 'init')
   writeFileSync(join(bin, 'claude'), fakeClaude(logs))
   chmodSync(join(bin, 'claude'), 0o755)
-  const env = { PATH: `${bin}:${process.env['PATH']}`, AGENT_CANVAS_TEST_REPO: repo }
+  const env = { PATH: `${bin}:${process.env['PATH']}`, NODSHELL_TEST_REPO: repo }
   const runs = (): Run[] => readdirSync(logs).filter((f) => f.endsWith('.json')).map((f) => JSON.parse(readFileSync(join(logs, f), 'utf8')) as Run)
   const agentBranches = () => git('for-each-ref', '--format=%(refname:short)', 'refs/heads/agent/').split('\n').filter(Boolean)
   const worktreeCount = () => (git('worktree', 'list', '--porcelain').match(/^worktree /gm) ?? []).length

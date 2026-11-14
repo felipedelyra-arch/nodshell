@@ -68,10 +68,10 @@ describe('hook settings file', () => {
       expect(statSync(a.settingsPath).mode & 0o777).toBe(0o600)
       expect(statSync(join(base, sid)).mode & 0o777).toBe(0o700)
       expect(JSON.parse(readFileSync(a.settingsPath, 'utf8'))).toEqual(hookSettings('/bin/electron', `${nasty}/hook-relay.js`))
-      expect(a.env.AGENT_CANVAS_HOOK_SOCKET).toBe(l.socketPath)
-      expect(a.env.AGENT_CANVAS_HOOK_TOKEN).toMatch(/^[0-9a-f]{64}$/)
-      expect(a.env.AGENT_CANVAS_HOOK_TOKEN).not.toBe(b.env.AGENT_CANVAS_HOOK_TOKEN)
-      expect(readFileSync(a.settingsPath, 'utf8')).not.toContain(a.env.AGENT_CANVAS_HOOK_TOKEN!) // the token never touches disk
+      expect(a.env.NODSHELL_HOOK_SOCKET).toBe(l.socketPath)
+      expect(a.env.NODSHELL_HOOK_TOKEN).toMatch(/^[0-9a-f]{64}$/)
+      expect(a.env.NODSHELL_HOOK_TOKEN).not.toBe(b.env.NODSHELL_HOOK_TOKEN)
+      expect(readFileSync(a.settingsPath, 'utf8')).not.toContain(a.env.NODSHELL_HOOK_TOKEN!) // the token never touches disk
       expect(() => svc.open(sid, () => undefined)).toThrow() // never reuses or overwrites a file
       expect(() => svc.open('../x', () => undefined)).toThrow('Invalid session id')
       a.close()
@@ -182,7 +182,7 @@ describe('hook relay (child process, exec form as Claude runs it)', () => {
     const { token } = l.register((s) => got.push(s))
     try {
       const input = { hook_event_name: 'Stop', session_id: sid, transcript_path: '/t/x.jsonl', last_assistant_message: 'secret reply', cwd: '/w' }
-      const r = await runRelay(relay, { AGENT_CANVAS_HOOK_SOCKET: l.socketPath, AGENT_CANVAS_HOOK_TOKEN: token }, JSON.stringify(input))
+      const r = await runRelay(relay, { NODSHELL_HOOK_SOCKET: l.socketPath, NODSHELL_HOOK_TOKEN: token }, JSON.stringify(input))
       expect(r.code).toBe(0)
       expect(r.out).toBe('')
       await new Promise((res) => setTimeout(res, 50))
@@ -193,9 +193,9 @@ describe('hook relay (child process, exec form as Claude runs it)', () => {
   })
 
   it.each([
-    ['the socket does not exist', { AGENT_CANVAS_HOOK_SOCKET: '/nonexistent/hooks.sock', AGENT_CANVAS_HOOK_TOKEN: 'a'.repeat(64) }, '{"hook_event_name":"Stop"}'],
+    ['the socket does not exist', { NODSHELL_HOOK_SOCKET: '/nonexistent/hooks.sock', NODSHELL_HOOK_TOKEN: 'a'.repeat(64) }, '{"hook_event_name":"Stop"}'],
     ['no environment', {}, '{"hook_event_name":"Stop"}'],
-    ['stdin is not JSON', { AGENT_CANVAS_HOOK_SOCKET: '/nonexistent/hooks.sock', AGENT_CANVAS_HOOK_TOKEN: 'a'.repeat(64) }, 'not json'],
+    ['stdin is not JSON', { NODSHELL_HOOK_SOCKET: '/nonexistent/hooks.sock', NODSHELL_HOOK_TOKEN: 'a'.repeat(64) }, 'not json'],
   ])('exits 0 quickly and silently when %s', async (_n, env, stdin) => {
     const r = await runRelay(relay, env, stdin)
     expect(r).toMatchObject({ code: 0, out: '' })
@@ -212,8 +212,8 @@ describe('socket directory', () => {
 
   it('removes stale directories of dead app processes and keeps live ones', async () => {
     const base = mkdtempSync(join(tmp, 'base-'))
-    const stale = join(base, 'agent-canvas-hooks-999999999-abc')
-    const live = join(base, `agent-canvas-hooks-${process.ppid}-abc`)
+    const stale = join(base, 'nodshell-hooks-999999999-abc')
+    const live = join(base, `nodshell-hooks-${process.ppid}-abc`)
     mkdirSync(stale)
     mkdirSync(live)
     const l = await HookListener.start(base)

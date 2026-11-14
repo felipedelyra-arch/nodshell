@@ -57,7 +57,7 @@ export function AboutDialog({ onClose }: { onClose: () => void }) {
   return (
     <AppDialog label="About" onClose={onClose}>
       <p className="mt-3 text-sm text-text">
-        Agent Canvas <span className="font-mono text-muted">{d ? d.version : ''}</span>
+        NodShell <span className="font-mono text-muted">{d ? d.version : ''}</span>
       </p>
       <LiveLimitField />
       <h3 className="field-label">Keyboard shortcuts</h3>

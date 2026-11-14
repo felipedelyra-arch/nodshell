@@ -13,7 +13,7 @@ import { MEMORY_MAX } from '../../src/shared/memory'
 let dir: string
 let db: Db
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'agent-canvas-board-'))
+  dir = mkdtempSync(join(tmpdir(), 'nodshell-board-'))
   db = openDatabase(join(dir, 'test.db'))
 })
 afterEach(() => {

@@ -59,7 +59,7 @@ describe('McpServer (JSON-RPC over the private socket)', () => {
 
   it('initialize, notifications, tools/list and tools/call; unknown methods and bad input are errors', async () => {
     const init = await server.handleLine(line(token, rpc(1, 'initialize', { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'claude', version: '2' } })))
-    expect(init).toEqual({ jsonrpc: '2.0', id: 1, result: { protocolVersion: '2025-03-26', capabilities: { tools: {} }, serverInfo: { name: 'agent-canvas', version: '1.0.0' } } })
+    expect(init).toEqual({ jsonrpc: '2.0', id: 1, result: { protocolVersion: '2025-03-26', capabilities: { tools: {} }, serverInfo: { name: 'nodshell', version: '1.0.0' } } })
     expect(await server.handleLine(line(token, rpc(undefined, 'notifications/initialized')))).toBeNull()
     const list = (await server.handleLine(line(token, rpc(2, 'tools/list')))) as { result: { tools: { name: string; inputSchema: { type: string } }[] } }
     expect(list.result.tools.map((t) => t.name)).toEqual(['list_agents', 'send_message', 'read_last_message', 'report_status', 'memory_read', 'memory_write'])
@@ -307,10 +307,10 @@ describe('MCP config file', () => {
       expect(statSync(a.configPath).mode & 0o777).toBe(0o600)
       expect(statSync(join(base, sid)).mode & 0o777).toBe(0o700)
       const cfg = JSON.parse(readFileSync(a.configPath, 'utf8')) as ReturnType<typeof mcpConfig>
-      const s = cfg.mcpServers['agent-canvas']
+      const s = cfg.mcpServers['nodshell']
       expect(s).toMatchObject({ type: 'stdio', command: '/usr/bin/env', args: ['ELECTRON_RUN_AS_NODE=1', '/bin/electron', `${nasty}/mcp-relay.js`] })
-      expect(s.env.AGENT_CANVAS_MCP_SOCKET).toBe(server.socketPath)
-      const token = s.env.AGENT_CANVAS_MCP_TOKEN
+      expect(s.env.NODSHELL_MCP_SOCKET).toBe(server.socketPath)
+      const token = s.env.NODSHELL_MCP_TOKEN
       expect(token).toMatch(/^[0-9a-f]{64}$/)
       expect(await server.handleLine(line(token, rpc(1, 'ping')))).toMatchObject({ result: {} })
       expect(() => svc.open(sid, () => 'agent-1')).toThrow() // never overwrites a file
@@ -356,12 +356,12 @@ describe('MCP relay (child process, as Claude Code runs it)', () => {
     const { token } = server.register(() => 'agent-1')
     try {
       const input = [rpc(1, 'initialize', { protocolVersion: '2025-06-18' }), rpc(undefined, 'notifications/initialized'), rpc(2, 'tools/list'), rpc(3, 'tools/call', { name: 'list_agents', arguments: {} })].map((m) => JSON.stringify(m)).join('\n') + '\n' + 'x'.repeat(MCP_MAX_LINE + 10) + '\nnot json\n'
-      const r = await run({ AGENT_CANVAS_MCP_SOCKET: server.socketPath, AGENT_CANVAS_MCP_TOKEN: token }, input, 4)
+      const r = await run({ NODSHELL_MCP_SOCKET: server.socketPath, NODSHELL_MCP_TOKEN: token }, input, 4)
       const replies = r.out.map((l) => JSON.parse(l) as { id: number | null; result?: { content?: unknown }; error?: unknown })
       expect(replies.map((x) => x.id).sort()).toEqual([1, 2, 3, null, null].sort()) // the parse error and the oversized line without an id
       expect(replies.find((x) => x.id === 3)!.result).toEqual({ content: [{ type: 'text', text: 'ran list_agents' }], isError: false })
       expect(r.err).toBe('')
-      const denied = await run({ AGENT_CANVAS_MCP_SOCKET: server.socketPath, AGENT_CANVAS_MCP_TOKEN: 'f'.repeat(64) }, JSON.stringify(rpc(1, 'tools/list')) + '\n', 1)
+      const denied = await run({ NODSHELL_MCP_SOCKET: server.socketPath, NODSHELL_MCP_TOKEN: 'f'.repeat(64) }, JSON.stringify(rpc(1, 'tools/list')) + '\n', 1)
       expect(JSON.parse(denied.out[0]!)).toMatchObject({ id: 1, error: { code: -32001 } })
     } finally {
       server.close()
@@ -379,7 +379,7 @@ describe('MCP relay (child process, as Claude Code runs it)', () => {
       const near = sized(7, MCP_MAX_LINE - 256 - 4)
       const over = sized(8, MCP_MAX_LINE)
       const after = JSON.stringify(rpc(9, 'ping'))
-      const r = await run({ AGENT_CANVAS_MCP_SOCKET: server.socketPath, AGENT_CANVAS_MCP_TOKEN: token }, `${near}\n${over}\n${after}\n`, 3)
+      const r = await run({ NODSHELL_MCP_SOCKET: server.socketPath, NODSHELL_MCP_TOKEN: token }, `${near}\n${over}\n${after}\n`, 3)
       const byId = new Map(r.out.map((l) => JSON.parse(l) as { id: number; result?: unknown; error?: { code: number; message: string } }).map((x) => [x.id, x]))
       expect(byId.get(7)!.result).toEqual({ content: [{ type: 'text', text: 'ran report_status' }], isError: false })
       expect(byId.get(8)!.error).toEqual({ code: -32600, message: 'Request too large' })
@@ -392,6 +392,6 @@ describe('MCP relay (child process, as Claude Code runs it)', () => {
 
   it('exits quietly without its environment or when the app is not there', async () => {
     expect(await run({}, '', 0)).toMatchObject({ out: [], err: '', code: 1 })
-    expect(await run({ AGENT_CANVAS_MCP_SOCKET: join(tmp, 'none.sock'), AGENT_CANVAS_MCP_TOKEN: 'a'.repeat(64) }, '', 0)).toMatchObject({ out: [], err: '', code: 1 })
+    expect(await run({ NODSHELL_MCP_SOCKET: join(tmp, 'none.sock'), NODSHELL_MCP_TOKEN: 'a'.repeat(64) }, '', 0)).toMatchObject({ out: [], err: '', code: 1 })
   })
 })

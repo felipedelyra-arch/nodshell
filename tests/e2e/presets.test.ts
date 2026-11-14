@@ -104,7 +104,7 @@ test('Spawn 4 of Frontend: four grouped agents, label, collapse keeps terminals,
     await expectGone(...r.runs().map((x) => x.pid))
     await expect.poll(() => r.agentBranches()).toEqual([])
     expect(r.worktreeCount()).toBe(1)
-    expect(existsSync(join(tmp, 'userdata', 'agent-canvas.db'))).toBe(true)
+    expect(existsSync(join(tmp, 'userdata', 'nodshell.db'))).toBe(true)
     await clean(page, errors)
   } finally {
     await app.close()
@@ -203,10 +203,10 @@ test('presets: create, validate, edit, delete, built-ins, focus handling, persis
 
     // the app is restarted with the same data dir: the preset is still there, fields intact
     const userdata = join(first.tmp, 'userdata')
-    expect(statSync(join(userdata, 'agent-canvas.db')).mode & 0o777).toBe(0o600)
+    expect(statSync(join(userdata, 'nodshell.db')).mode & 0o777).toBe(0o600)
     await clean(page, first.errors)
     await app.close()
-    const second = await launch({ ...r.env, AGENT_CANVAS_USER_DATA: userdata })
+    const second = await launch({ ...r.env, NODSHELL_USER_DATA: userdata })
     app = second.app
     page = second.page
     await page.getByRole('button', { name: 'Presets', exact: true }).click()

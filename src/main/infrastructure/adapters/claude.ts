@@ -74,7 +74,7 @@ export class ClaudeAdapter implements AgentAdapter {
     // the CLI rejects --session-id together with --resume (unless forking): a resumed agent keeps the resumed id
     if (o.hooks) args.push(`--settings=${text(o.hooks.settingsPath)}`)
     args.push(o.resumeId !== undefined ? `--resume=${uuid(o.resumeId)}` : `--session-id=${uuid(o.sessionId)}`)
-    // hook variables go in after the filter (which drops AGENT_CANVAS_*)
+    // hook variables go in after the filter (which drops NODSHELL_*)
     return { cmd, args, env: { ...claudeEnv(this.env), ...o.hooks?.env } }
   }
 

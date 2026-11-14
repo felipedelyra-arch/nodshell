@@ -10,7 +10,7 @@ let dir: string
 let db: Db
 let repo: SqliteLoopRepo
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'agent-canvas-loops-'))
+  dir = mkdtempSync(join(tmpdir(), 'nodshell-loops-'))
   db = openDatabase(join(dir, 'test.db'))
   repo = new SqliteLoopRepo(db)
 })

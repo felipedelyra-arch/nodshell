@@ -16,8 +16,8 @@ const resumedOf = (run: Run) => run.argv.find((a) => a.startsWith('--resume='))?
 
 /** The same user-data dir and HOME on every launch of a test: what one run saves, the next one finds. */
 function persistent(r: ReturnType<typeof setupRepo>) {
-  const home = tempDir('agent-canvas-e2e-home-')
-  return (restore: 'resume' | 'fresh' | 'empty') => ({ ...r.env, HOME: home, AGENT_CANVAS_USER_DATA: join(home, 'userdata'), AGENT_CANVAS_TEST_RESTORE: restore })
+  const home = tempDir('nodshell-e2e-home-')
+  return (restore: 'resume' | 'fresh' | 'empty') => ({ ...r.env, HOME: home, NODSHELL_USER_DATA: join(home, 'userdata'), NODSHELL_TEST_RESTORE: restore })
 }
 
 async function createSquad(page: Page): Promise<void> {
@@ -373,7 +373,7 @@ test('a console opened before the project stays (card and process) when the proj
     await expect.poll(() => r.runs().length).toBe(1)
     const name = (await page.getByTestId('agent-node').getAttribute('data-name'))!
     // another project: the first one is saved, and the other becomes the last one opened
-    await app.evaluate((_e, dir) => void (process.env['AGENT_CANVAS_TEST_REPO'] = dir), r2.repo)
+    await app.evaluate((_e, dir) => void (process.env['NODSHELL_TEST_REPO'] = dir), r2.repo)
     await page.getByTestId('workspace').click()
     await page.getByRole('menuitem', { name: 'Open folder…' }).click()
     await expect(page.getByTestId('agent-node')).toHaveCount(0)

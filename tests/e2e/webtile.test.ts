@@ -281,8 +281,8 @@ test('quit and reopen brings the tile back at its address and place', async () =
   test.setTimeout(120_000)
   const s = await site()
   const r = setupRepo()
-  const home = tempDir('agent-canvas-e2e-home-')
-  const env = { ...r.env, HOME: home, AGENT_CANVAS_USER_DATA: join(home, 'userdata'), AGENT_CANVAS_TEST_RESTORE: 'resume' }
+  const home = tempDir('nodshell-e2e-home-')
+  const env = { ...r.env, HOME: home, NODSHELL_USER_DATA: join(home, 'userdata'), NODSHELL_TEST_RESTORE: 'resume' }
   let { app, page, errors } = await launch(env)
   try {
     await openRepo(page)

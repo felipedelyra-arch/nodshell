@@ -5,7 +5,7 @@ import { isAbsolute, join } from 'node:path'
 import type { HookSignal } from '../../domain/adapter'
 import { envelopeSchema, hookEventSchema, MAX_LINE, toSignal } from './schema'
 
-const PREFIX = 'agent-canvas-hooks-'
+const PREFIX = 'nodshell-hooks-'
 const SOCKET = 'hooks.sock'
 /** sun_path is 108 bytes on Linux; keep a margin */
 const MAX_SOCKET_PATH = 100

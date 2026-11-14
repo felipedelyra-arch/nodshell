@@ -123,7 +123,7 @@ const jfk = join(homedir(), '.local', 'share', 'whisper.cpp', 'src', 'samples', 
 
 /** A fake whisper-cli: answers with a fixed text only when it got a RIFF WAV with real audio on stdin. */
 function fakeWhisper(delayMs = 0): { WHISPER_BIN: string; WHISPER_MODEL: string } {
-  const dir = tempDir('agent-canvas-whisper-')
+  const dir = tempDir('nodshell-whisper-')
   const bin = join(dir, 'whisper-cli')
   writeFileSync(bin, `#!${process.execPath}\nlet n = 0, h = ''\nprocess.stdin.on('data', (d) => { n += d.length; if (!h) h = d.subarray(0, 4).toString() })\nprocess.stdin.on('end', () => setTimeout(() => process.stdout.write(h === 'RIFF' && n > 20000 ? ' review the code\\n' : 'bad ' + h + n), ${delayMs}))\n`)
   chmodSync(bin, 0o755)
@@ -137,7 +137,7 @@ test('dictation: hold Space on the board writes into the field and never sends; 
   test.setTimeout(120_000)
   const r = setupRepo()
   const w = fakeWhisper()
-  const { app, page, errors } = await launch({ ...r.env, AGENT_CANVAS_TEST_FAKE_MIC: jfk, AGENT_CANVAS_WHISPER_BIN: w.WHISPER_BIN, AGENT_CANVAS_WHISPER_MODEL: w.WHISPER_MODEL })
+  const { app, page, errors } = await launch({ ...r.env, NODSHELL_TEST_FAKE_MIC: jfk, NODSHELL_WHISPER_BIN: w.WHISPER_BIN, NODSHELL_WHISPER_MODEL: w.WHISPER_MODEL })
   try {
     await openRepo(page)
     await spawnAgent(page, 'backend', 'sonnet', 1)
@@ -205,7 +205,7 @@ test('dictation: hold Space on the board writes into the field and never sends; 
 
 test('without whisper.cpp the microphones are disabled with a hint and Space does not record', async () => {
   const r = setupRepo()
-  const { app, page, errors } = await launch({ ...r.env, AGENT_CANVAS_WHISPER_BIN: '/nonexistent/whisper-cli' })
+  const { app, page, errors } = await launch({ ...r.env, NODSHELL_WHISPER_BIN: '/nonexistent/whisper-cli' })
   try {
     await openRepo(page)
     const mic = page.getByRole('button', { name: 'Dictate command' })
@@ -231,7 +231,7 @@ test('dictation: leaving the window ends a tap-started recording; the focus is n
   test.setTimeout(120_000)
   const r = setupRepo()
   const w = fakeWhisper(2500)
-  const { app, page, errors } = await launch({ ...r.env, AGENT_CANVAS_TEST_FAKE_MIC: jfk, AGENT_CANVAS_WHISPER_BIN: w.WHISPER_BIN, AGENT_CANVAS_WHISPER_MODEL: w.WHISPER_MODEL })
+  const { app, page, errors } = await launch({ ...r.env, NODSHELL_TEST_FAKE_MIC: jfk, NODSHELL_WHISPER_BIN: w.WHISPER_BIN, NODSHELL_WHISPER_MODEL: w.WHISPER_MODEL })
   try {
     await openRepo(page)
     await spawnAgent(page, 'backend', 'sonnet', 1)

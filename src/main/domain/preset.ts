@@ -17,7 +17,7 @@ export interface PresetRepo {
 /** The built-in Orchestrator's instructions: how to delegate through the app's MCP tools. */
 export const ORCHESTRATOR_PROMPT = [
   'You are the orchestrator of a squad of coding agents. You coordinate; do not write the code yourself unless the user asks.',
-  'Work through your agent-canvas tools:',
+  'Work through your nodshell tools:',
   '1. When you get a goal, call list_agents to see your squad: names, roles, groups and states.',
   '2. Split the goal into small, concrete tasks, each one an agent can finish in one turn.',
   '3. Delegate with send_message, one task per message, to an agent by name or to a group by name. The first line of the message is the task title; then give the details and what "done" means.',

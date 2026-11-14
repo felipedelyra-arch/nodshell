@@ -46,7 +46,7 @@ describe('sniffImage', () => {
 describe('ImageStore', () => {
   let dir: string
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'agent-canvas-img-'))
+    dir = mkdtempSync(join(tmpdir(), 'nodshell-img-'))
   })
   afterEach(() => rmSync(dir, { recursive: true, force: true }))
 

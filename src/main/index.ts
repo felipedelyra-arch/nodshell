@@ -62,18 +62,18 @@ import { normalizeAddress, WebTileError } from './domain/webtile'
 import { WEBTILES_MAX } from '../shared/webtile'
 
 // Test-only override of the data directory; ignored in packaged builds.
-const userDataOverride = process.env['AGENT_CANVAS_USER_DATA']
+const userDataOverride = process.env['NODSHELL_USER_DATA']
 if (!app.isPackaged && userDataOverride && isAbsolute(userDataOverride)) app.setPath('userData', userDataOverride)
 
 // Test-only: a fake microphone that plays this WAV file (Chromium switches must be set before ready); ignored in packaged builds.
-const fakeMic = process.env['AGENT_CANVAS_TEST_FAKE_MIC']
+const fakeMic = process.env['NODSHELL_TEST_FAKE_MIC']
 if (!app.isPackaged && fakeMic && isAbsolute(fakeMic)) {
   for (const sw of ['use-fake-device-for-media-stream', 'use-fake-ui-for-media-stream']) app.commandLine.appendSwitch(sw)
   app.commandLine.appendSwitch('use-file-for-fake-audio-capture', fakeMic)
 }
 
 // Test-only: milliseconds per second of every loop timer (schedule, idle count, output cooldown); ignored in packaged builds.
-const loopMs = Number(app.isPackaged ? undefined : process.env['AGENT_CANVAS_TEST_LOOP_MS'])
+const loopMs = Number(app.isPackaged ? undefined : process.env['NODSHELL_TEST_LOOP_MS'])
 const LOOP_MS_PER_SEC = Number.isInteger(loopMs) && loopMs >= 1 && loopMs <= 1000 ? loopMs : 1000
 
 const devUrl = process.env['ELECTRON_RENDERER_URL']
@@ -130,7 +130,7 @@ function confirmFor(senderId: number): ConfirmDiscard {
 }
 
 // Test-only: scripted answers ("yes"/"no", comma separated, the last one repeats) instead of the close dialog; ignored in packaged builds.
-const closeAnswers = app.isPackaged ? [] : (process.env['AGENT_CANVAS_TEST_CLOSE'] ?? '').split(',').filter((a) => a === 'yes' || a === 'no')
+const closeAnswers = app.isPackaged ? [] : (process.env['NODSHELL_TEST_CLOSE'] ?? '').split(',').filter((a) => a === 'yes' || a === 'no')
 let closeAsked = 0
 
 /** Native dialog before stopping a live process; "Keep running" is the default and also what Esc or closing the dialog means. */
@@ -143,7 +143,7 @@ async function confirmClose(senderId: number, message: string, detail: string): 
 }
 
 // Test-only: scripted answers ("yes"/"no", comma separated, the last one repeats) instead of the spawn_agent dialog; ignored in packaged builds.
-const spawnAnswers = app.isPackaged ? [] : (process.env['AGENT_CANVAS_TEST_SPAWN'] ?? '').split(',').filter((a) => a === 'yes' || a === 'no')
+const spawnAnswers = app.isPackaged ? [] : (process.env['NODSHELL_TEST_SPAWN'] ?? '').split(',').filter((a) => a === 'yes' || a === 'no')
 let spawnAsked = 0
 /** Unanswered this long, the spawn dialog closes as denied (below the MCP relay's own reply timeout). */
 const SPAWN_ASK_MS = 90_000
@@ -174,18 +174,18 @@ async function confirmSpawn(ownerId: number, q: SpawnQuestion): Promise<boolean>
 }
 
 // Test-only: scripted answer ("yes"/"no") instead of the leave dialog; ignored in packaged builds.
-const leaveAnswer = app.isPackaged ? undefined : process.env['AGENT_CANVAS_TEST_LEAVE']
+const leaveAnswer = app.isPackaged ? undefined : process.env['NODSHELL_TEST_LEAVE']
 
 /** Native dialog before closing the window or quitting would stop live agents or programs; "Keep running" is the default. */
 async function confirmLeave(win: BrowserWindow | null): Promise<boolean> {
   if (leaveAnswer === 'yes' || leaveAnswer === 'no') return leaveAnswer === 'yes'
-  const opts: MessageBoxOptions = { type: 'warning', buttons: ['Keep running', 'Close'], defaultId: 0, cancelId: 0, noLink: true, title: 'Close', message: 'Close Agent Canvas?', detail: 'Agents or programs are still running and will be stopped.' }
+  const opts: MessageBoxOptions = { type: 'warning', buttons: ['Keep running', 'Close'], defaultId: 0, cancelId: 0, noLink: true, title: 'Close', message: 'Close NodShell?', detail: 'Agents or programs are still running and will be stopped.' }
   const r = win && !win.isDestroyed() ? await dialog.showMessageBox(win, opts) : await dialog.showMessageBox(opts)
   return r.response === 1
 }
 
 // Test-only: scripted answer ("resume"/"fresh"/"empty") instead of the restore dialog; ignored in packaged builds.
-const restoreAnswer = app.isPackaged ? undefined : process.env['AGENT_CANVAS_TEST_RESTORE']
+const restoreAnswer = app.isPackaged ? undefined : process.env['NODSHELL_TEST_RESTORE']
 
 /** Native dialog when a project with a saved board opens; "Resume conversations" is the default and also what Esc means. */
 async function askRestore(senderId: number, terminals: number): Promise<RestoreChoice> {
@@ -504,7 +504,7 @@ void app.whenReady().then(async () => {
   const db = await Promise.resolve()
     .then(() => {
       mkdirSync(app.getPath('userData'), { recursive: true, mode: 0o700 })
-      const d = openDatabase(join(app.getPath('userData'), 'agent-canvas.db'))
+      const d = openDatabase(join(app.getPath('userData'), 'nodshell.db'))
       app.on('will-quit', () => d.close())
       return d
     })
@@ -933,7 +933,7 @@ void app.whenReady().then(async () => {
     return { ok: true as const }
   })
   // Test-only: a file to add instead of the file dialog (same validation); ignored in packaged builds.
-  const testImage = app.isPackaged ? undefined : process.env['AGENT_CANVAS_TEST_IMAGE']
+  const testImage = app.isPackaged ? undefined : process.env['NODSHELL_TEST_IMAGE']
   handle('image:pick', appOrigin, (_in, { senderId }) =>
     safe('Could not add the image', async () => {
       let file = testImage && isAbsolute(testImage) ? testImage : undefined
@@ -986,7 +986,7 @@ void app.whenReady().then(async () => {
       notRestoring()
       if (repo) assertNotStarting({ starting }) // before the dialog: an agent still starting would end up without a card
       // Test-only: skips the dialog (same validation below); ignored in packaged builds.
-      const testRepo = app.isPackaged ? undefined : process.env['AGENT_CANVAS_TEST_REPO']
+      const testRepo = app.isPackaged ? undefined : process.env['NODSHELL_TEST_REPO']
       let dir = testRepo
       if (!dir) {
         const win = windowOf(senderId)

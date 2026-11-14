@@ -38,8 +38,8 @@ async function drag(page: Page, from: [number, number], to: [number, number], vi
 
 /** The same user-data dir and HOME on every launch: what one run saves, the next one finds. */
 function persistent(extra: Record<string, string>) {
-  const home = tempDir('agent-canvas-e2e-home-')
-  return () => ({ ...extra, HOME: home, AGENT_CANVAS_USER_DATA: join(home, 'userdata'), AGENT_CANVAS_TEST_RESTORE: 'resume' })
+  const home = tempDir('nodshell-e2e-home-')
+  return () => ({ ...extra, HOME: home, NODSHELL_USER_DATA: join(home, 'userdata'), NODSHELL_TEST_RESTORE: 'resume' })
 }
 const imagesDir = (tmp: string) => join(tmp, 'userdata', 'board-images')
 
@@ -55,10 +55,10 @@ async function putOnClipboard(app: Launched['app'], file: Buffer): Promise<void>
 test('acceptance: a stroke, a shape, a note, a picked image and a pasted image come back in place after quitting', async () => {
   test.setTimeout(180_000)
   const r = setupRepo()
-  const dir = tempDir('agent-canvas-e2e-img-')
+  const dir = tempDir('nodshell-e2e-img-')
   const file = join(dir, 'orange.png')
   writeFileSync(file, png(60, 40))
-  const env = persistent({ ...r.env, AGENT_CANVAS_TEST_IMAGE: file })
+  const env = persistent({ ...r.env, NODSHELL_TEST_IMAGE: file })
   const home = env()
   let { app, page, errors } = await launch(home)
   try {
@@ -144,10 +144,10 @@ test('acceptance: a stroke, a shape, a note, a picked image and a pasted image c
 test('a board with only drawings (no terminals) comes back with them; Empty board throws them and the image files away', async () => {
   test.setTimeout(120_000)
   const r = setupRepo()
-  const dir = tempDir('agent-canvas-e2e-img-')
+  const dir = tempDir('nodshell-e2e-img-')
   const file = join(dir, 'a.png')
   writeFileSync(file, png(20, 20))
-  const env = persistent({ ...r.env, AGENT_CANVAS_TEST_IMAGE: file })
+  const env = persistent({ ...r.env, NODSHELL_TEST_IMAGE: file })
   const home = env()
   let { app, page } = await launch(home)
   try {
@@ -171,7 +171,7 @@ test('a board with only drawings (no terminals) comes back with them; Empty boar
     await newConsole(page, 1)
     await page.waitForTimeout(1200)
     await app.close()
-    ;({ app, page } = await launch({ ...home, AGENT_CANVAS_TEST_RESTORE: 'empty' }))
+    ;({ app, page } = await launch({ ...home, NODSHELL_TEST_RESTORE: 'empty' }))
     await expect(page.getByTestId('repo-badge')).toHaveText('main')
     await expect(items(page)).toHaveCount(0)
     await expect(page.getByTestId('terminal-node')).toHaveCount(0)
@@ -461,10 +461,10 @@ test('a squad with annotations behind it; a maximized card clears the toolbar; s
 
 test('a file named .png that holds SVG is refused with a notice; an empty clipboard says so; nothing is stored', async () => {
   test.setTimeout(60_000)
-  const dir = tempDir('agent-canvas-e2e-img-')
+  const dir = tempDir('nodshell-e2e-img-')
   const file = join(dir, 'cat.png')
   writeFileSync(file, '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><script>alert(1)</script></svg>')
-  const home = persistent({ AGENT_CANVAS_TEST_IMAGE: file })()
+  const home = persistent({ NODSHELL_TEST_IMAGE: file })()
   const { app, page } = await launch(home)
   try {
     await tool(page, 'Image').click()
@@ -486,13 +486,13 @@ const jfk = join(homedir(), '.local', 'share', 'whisper.cpp', 'src', 'samples', 
 test('holding Space with the pen active records for the command bar and draws nothing', async () => {
   test.skip(!existsSync(jfk), 'the whisper.cpp sample is not installed')
   test.setTimeout(90_000)
-  const dir = tempDir('agent-canvas-whisper-')
+  const dir = tempDir('nodshell-whisper-')
   const bin = join(dir, 'whisper-cli')
   writeFileSync(bin, `#!${process.execPath}\nlet n = 0, h = ''\nprocess.stdin.on('data', (d) => { n += d.length; if (!h) h = d.subarray(0, 4).toString() })\nprocess.stdin.on('end', () => process.stdout.write(h === 'RIFF' && n > 20000 ? ' review the code\\n' : 'bad ' + h + n))\n`)
   chmodSync(bin, 0o755)
   const model = join(dir, 'model.bin')
   writeFileSync(model, 'x')
-  const { app, page, errors } = await launch({ AGENT_CANVAS_TEST_FAKE_MIC: jfk, AGENT_CANVAS_WHISPER_BIN: bin, AGENT_CANVAS_WHISPER_MODEL: model })
+  const { app, page, errors } = await launch({ NODSHELL_TEST_FAKE_MIC: jfk, NODSHELL_WHISPER_BIN: bin, NODSHELL_WHISPER_MODEL: model })
   try {
     const field = page.getByRole('combobox', { name: 'Command', exact: true })
     await expect(page.getByRole('button', { name: 'Dictate command' })).not.toHaveAttribute('aria-disabled', 'true')

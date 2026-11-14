@@ -18,10 +18,10 @@ const isFile = (p: string): boolean => {
   }
 }
 
-/** The paths of the installed whisper.cpp, or the ones in AGENT_CANVAS_WHISPER_BIN / AGENT_CANVAS_WHISPER_MODEL. */
+/** The paths of the installed whisper.cpp, or the ones in NODSHELL_WHISPER_BIN / NODSHELL_WHISPER_MODEL. */
 export function whisperFromEnv(env: NodeJS.ProcessEnv = process.env): WhisperCppProvider {
   const base = join(homedir(), '.local', 'share', 'whisper.cpp')
-  return new WhisperCppProvider({ bin: env['AGENT_CANVAS_WHISPER_BIN'] || join(base, 'src', 'build', 'bin', 'whisper-cli'), model: env['AGENT_CANVAS_WHISPER_MODEL'] || join(base, 'models', 'ggml-base.bin') })
+  return new WhisperCppProvider({ bin: env['NODSHELL_WHISPER_BIN'] || join(base, 'src', 'build', 'bin', 'whisper-cli'), model: env['NODSHELL_WHISPER_MODEL'] || join(base, 'models', 'ggml-base.bin') })
 }
 
 /** Runs `whisper-cli` once per request (argv array, no shell): the WAV goes to its stdin and the text comes back on stdout; nothing touches the disk. */

@@ -94,7 +94,7 @@ test('acceptance: Frontend -> Reviewers fires on Stop, Pause all holds everythin
         secrets.add(file!)
         const text = readFileSync(file!, 'utf8')
         for (const t of text.match(/[0-9a-f]{64}/g) ?? []) secrets.add(t)
-        for (const m of text.matchAll(/"AGENT_CANVAS_\w*SOCKET":\s*"([^"]+)"/g)) secrets.add(m[1]!)
+        for (const m of text.matchAll(/"NODSHELL_\w*SOCKET":\s*"([^"]+)"/g)) secrets.add(m[1]!)
       }
       secrets.add(run.hookSocket)
       secrets.add(run.cwd)

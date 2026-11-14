@@ -192,8 +192,8 @@ function Workbench() {
   const spawnTip = !repo ? 'Open a repository first' : restoring ? 'Wait for the board to finish restoring' : paused ? PAUSED_TIP : undefined
 
   return (
-    <main className="relative h-screen w-screen" aria-label="Agent Canvas">
-      <h1 className="sr-only">Agent Canvas</h1>
+    <main className="relative h-screen w-screen" aria-label="NodShell">
+      <h1 className="sr-only">NodShell</h1>
       <TopBar />
       <TopRight />
       <div role="tabpanel" id="board" aria-labelledby={`tab-${active}`} className="absolute inset-0">

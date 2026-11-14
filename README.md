@@ -1,4 +1,4 @@
-# Agent Canvas
+# NodShell
 
 A desktop cockpit for coding agents. Every node on an infinite canvas is a real terminal running [Claude Code](https://claude.com/claude-code); agents are grouped by role, wired together with edges, and coordinated by an Orchestrator node.
 
@@ -23,19 +23,19 @@ Linux only for now.
 
 ## Install
 
-Download the latest package from the [Releases](https://github.com/felipedelyra-arch/agent-canvas/releases) page.
+Download the latest package from the [Releases](https://github.com/felipedelyra-arch/nodshell/releases) page.
 
 **Debian / Ubuntu**
 
 ```sh
-sudo apt install ./agent-canvas-0.1.0-amd64.deb
+sudo apt install ./nodshell-0.1.0-amd64.deb
 ```
 
 **AppImage**
 
 ```sh
-chmod +x agent-canvas-0.1.0-x86_64.AppImage
-./agent-canvas-0.1.0-x86_64.AppImage
+chmod +x nodshell-0.1.0-x86_64.AppImage
+./nodshell-0.1.0-x86_64.AppImage
 ```
 
 The AppImage needs FUSE 2 (`libfuse2`, or `libfuse2t64` on recent Ubuntu releases).
@@ -55,8 +55,8 @@ Build whisper.cpp and download a model, then either place them at the default lo
 
 | | Default | Override |
 |---|---|---|
-| Binary | `~/.local/share/whisper.cpp/src/build/bin/whisper-cli` | `AGENT_CANVAS_WHISPER_BIN` |
-| Model | `~/.local/share/whisper.cpp/models/ggml-base.bin` | `AGENT_CANVAS_WHISPER_MODEL` |
+| Binary | `~/.local/share/whisper.cpp/src/build/bin/whisper-cli` | `NODSHELL_WHISPER_BIN` |
+| Model | `~/.local/share/whisper.cpp/models/ggml-base.bin` | `NODSHELL_WHISPER_MODEL` |
 
 ## Security model
 

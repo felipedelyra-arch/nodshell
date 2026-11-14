@@ -10,7 +10,7 @@ export function pickShell(envShell: string | undefined, etcShells: string): stri
   return '/bin/bash'
 }
 
-const DROP = [/^ELECTRON_/, /^NODE_OPTIONS$/, /^VITE_/, /^VITE$/, /^AGENT_CANVAS_/]
+const DROP = [/^ELECTRON_/, /^NODE_OPTIONS$/, /^VITE_/, /^VITE$/, /^NODSHELL_/]
 
 export function filterEnv(env: Record<string, string | undefined>): Record<string, string> {
   const out: Record<string, string> = {}

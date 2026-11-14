@@ -109,7 +109,7 @@ export class McpServer {
       case 'initialize': {
         const asked = params?.['protocolVersion']
         const version = typeof asked === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(asked) ? asked : PROTOCOL
-        return { jsonrpc: '2.0', id, result: { protocolVersion: version, capabilities: { tools: {} }, serverInfo: { name: 'agent-canvas', version: '1.0.0' } } }
+        return { jsonrpc: '2.0', id, result: { protocolVersion: version, capabilities: { tools: {} }, serverInfo: { name: 'nodshell', version: '1.0.0' } } }
       }
       case 'ping':
         return { jsonrpc: '2.0', id, result: {} }

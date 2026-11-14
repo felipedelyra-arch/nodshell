@@ -19,11 +19,11 @@ export function cleanupTemp(): void {
 }
 
 export async function launch(extraEnv: Record<string, string> = {}): Promise<Launched> {
-  const tmp = tempDir('agent-canvas-e2e-')
+  const tmp = tempDir('nodshell-e2e-')
   const app = await electron.launch({
     args: ['.'],
     // closing live processes is confirmed unless a test scripts the answer
-    env: { ...process.env, HOME: tmp, AGENT_CANVAS_USER_DATA: join(tmp, 'userdata'), AGENT_CANVAS_TEST_CLOSE: 'yes', AGENT_CANVAS_TEST_LEAVE: 'yes', ...extraEnv },
+    env: { ...process.env, HOME: tmp, NODSHELL_USER_DATA: join(tmp, 'userdata'), NODSHELL_TEST_CLOSE: 'yes', NODSHELL_TEST_LEAVE: 'yes', ...extraEnv },
   })
   const page = await app.firstWindow()
   const errors: string[] = []

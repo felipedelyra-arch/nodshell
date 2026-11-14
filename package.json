@@ -1,5 +1,5 @@
 {
-  "name": "agent-canvas",
+  "name": "nodshell",
   "version": "0.1.0",
   "private": true,
   "description": "Visual cockpit for coding agents running in real terminals",
@@ -49,10 +49,10 @@
   },
   "author": "Felipe",
   "license": "MIT",
-  "homepage": "https://github.com/felipedelyra-arch/agent-canvas",
+  "homepage": "https://github.com/felipedelyra-arch/nodshell",
   "build": {
-    "appId": "dev.agentcanvas.app",
-    "productName": "Agent Canvas",
+    "appId": "dev.nodshell.app",
+    "productName": "NodShell",
     "directories": {
       "output": "dist",
       "buildResources": "build"
@@ -69,11 +69,11 @@
       "category": "Development",
       "icon": "build/icon.png",
       "maintainer": "Felipe",
-      "artifactName": "agent-canvas-${version}-${arch}.${ext}",
-      "executableName": "agent-canvas",
+      "artifactName": "nodshell-${version}-${arch}.${ext}",
+      "executableName": "nodshell",
       "syncDesktopName": true
     },
     "npmRebuild": true
   },
-  "desktopName": "agent-canvas.desktop"
+  "desktopName": "nodshell.desktop"
 }

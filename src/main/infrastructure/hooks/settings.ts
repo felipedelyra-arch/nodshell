@@ -72,7 +72,7 @@ export class HookService {
     const reg = this.listener.register(onEvent)
     return {
       settingsPath,
-      env: { AGENT_CANVAS_HOOK_SOCKET: this.listener.socketPath, AGENT_CANVAS_HOOK_TOKEN: reg.token },
+      env: { NODSHELL_HOOK_SOCKET: this.listener.socketPath, NODSHELL_HOOK_TOKEN: reg.token },
       close: () => {
         reg.close()
         rmSync(dir, { recursive: true, force: true })

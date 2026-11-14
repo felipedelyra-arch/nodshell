@@ -13,7 +13,7 @@ export type DiagnosticsInput = {
 
 export function buildDiagnostics(d: DiagnosticsInput): string {
   return [
-    `Agent Canvas ${d.version}`,
+    `NodShell ${d.version}`,
     `Electron ${d.electron} / Chromium ${d.chrome} / Node ${d.node}`,
     `Platform: ${d.platform} ${d.arch}`,
     `Processes: ${d.consoles}`,

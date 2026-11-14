@@ -12,8 +12,8 @@ setTimeout(done, HARD_TIMEOUT_MS)
 process.on('uncaughtException', done)
 process.stdout.on('error', done)
 
-const socketPath = process.env['AGENT_CANVAS_HOOK_SOCKET']
-const token = process.env['AGENT_CANVAS_HOOK_TOKEN']
+const socketPath = process.env['NODSHELL_HOOK_SOCKET']
+const token = process.env['NODSHELL_HOOK_TOKEN']
 if (!socketPath || !token) done()
 
 const chunks: Buffer[] = []

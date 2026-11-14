@@ -60,7 +60,7 @@ test('chrome: top bar, pills, command bar, footer, dialogs', async () => {
     const dlg = page.getByRole('dialog', { name: 'Found a bug?' })
     await expect(dlg.getByLabel('Diagnostic')).toContainText('Process limit') // filled once the main process answers
     const text = (await dlg.getByLabel('Diagnostic').textContent()) ?? ''
-    expect(text).toMatch(/Agent Canvas \S+\nElectron \S+ \/ Chromium \S+ \/ Node \S+\nPlatform: \w+ \w+\nProcesses: \d+\nAgents: \d+\nProcess limit: \d+/)
+    expect(text).toMatch(/NodShell \S+\nElectron \S+ \/ Chromium \S+ \/ Node \S+\nPlatform: \w+ \w+\nProcesses: \d+\nAgents: \d+\nProcess limit: \d+/)
     for (const secret of [tmp, 'demo repo', r.repo]) expect(text).not.toContain(secret)
     await dlg.getByRole('button', { name: 'Copy' }).click()
     await expect(dlg.getByRole('status')).toHaveText('Copied')
@@ -73,7 +73,7 @@ test('chrome: top bar, pills, command bar, footer, dialogs', async () => {
     const info = page.getByRole('button', { name: 'About' })
     await info.click()
     const about = page.getByRole('dialog', { name: 'About' })
-    await expect(about).toContainText('Agent Canvas')
+    await expect(about).toContainText('NodShell')
     await expect(about).toContainText('Shift + click')
     // modal: the chrome behind it is covered
     expect(await page.locator('button.pill').first().evaluate((el) => { const r = el.getBoundingClientRect(); return document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2) === el })).toBe(false)

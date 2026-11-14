@@ -7,7 +7,7 @@ test.afterEach(cleanupTemp)
 test('isolation and API surface', async () => {
   const { app, page, errors } = await launch()
   try {
-    await expect(page.getByRole('heading', { name: 'Agent Canvas', includeHidden: true })).toBeAttached()
+    await expect(page.getByRole('heading', { name: 'NodShell', includeHidden: true })).toBeAttached()
     expect(await page.evaluate(() => typeof require)).toBe('undefined')
     expect(await page.evaluate(() => typeof process)).toBe('undefined')
     expect(await page.evaluate(() => Object.keys(window.api).sort())).toEqual(['invoke', 'on'])

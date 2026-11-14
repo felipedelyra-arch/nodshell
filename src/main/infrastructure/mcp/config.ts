@@ -11,11 +11,11 @@ import type { McpServer } from './server'
 export function mcpConfig(execPath: string, relayPath: string, socketPath: string, token: string) {
   return {
     mcpServers: {
-      'agent-canvas': {
+      'nodshell': {
         type: 'stdio',
         command: '/usr/bin/env',
         args: ['ELECTRON_RUN_AS_NODE=1', checkPath(execPath), checkPath(relayPath)],
-        env: { AGENT_CANVAS_MCP_SOCKET: checkPath(socketPath), AGENT_CANVAS_MCP_TOKEN: token },
+        env: { NODSHELL_MCP_SOCKET: checkPath(socketPath), NODSHELL_MCP_TOKEN: token },
       },
     },
   }

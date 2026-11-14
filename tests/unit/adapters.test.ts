@@ -71,8 +71,8 @@ describe('ClaudeAdapter.buildSpawn', () => {
     expect(() => adapter().buildSpawn({ ...base, ...o })).toThrow()
   })
   it('hooks: --settings before the session id, relay variables added after the env filter', () => {
-    const hooks = { settingsPath: '/data/agents/x/settings.json', env: { AGENT_CANVAS_HOOK_SOCKET: '/run/s.sock', AGENT_CANVAS_HOOK_TOKEN: 'a'.repeat(64) } }
-    const s = new ClaudeAdapter({ PATH: bin, AGENT_CANVAS_HOOK_TOKEN: 'inherited' }).buildSpawn({ ...base, model: 'haiku', hooks })
+    const hooks = { settingsPath: '/data/agents/x/settings.json', env: { NODSHELL_HOOK_SOCKET: '/run/s.sock', NODSHELL_HOOK_TOKEN: 'a'.repeat(64) } }
+    const s = new ClaudeAdapter({ PATH: bin, NODSHELL_HOOK_TOKEN: 'inherited' }).buildSpawn({ ...base, model: 'haiku', hooks })
     expect(s.args).toEqual(['--model=haiku', '--settings=/data/agents/x/settings.json', `--session-id=${sessionId}`])
     expect(s.env).toEqual({ PATH: bin, TERM: 'xterm-256color', ...hooks.env })
   })
@@ -93,7 +93,7 @@ describe('claudeEnv', () => {
   it('applies the F1 filter and drops a parent Claude Code session', () => {
     const env = claudeEnv({
       HOME: '/h', PATH: '/bin', ANTHROPIC_API_KEY: 'k', CLAUDECODE: '1', CLAUDE_CODE_ENTRYPOINT: 'cli', CLAUDE_CODE_SESSION_ID: 's',
-      CLAUDE_CODE_MESSAGING_TOKEN: 't', CLAUDE_PID: '1', CLAUDE_EFFORT: 'high', ELECTRON_RUN_AS_NODE: '1', NODE_OPTIONS: '--inspect', AGENT_CANVAS_TEST_REPO: '/r',
+      CLAUDE_CODE_MESSAGING_TOKEN: 't', CLAUDE_PID: '1', CLAUDE_EFFORT: 'high', ELECTRON_RUN_AS_NODE: '1', NODE_OPTIONS: '--inspect', NODSHELL_TEST_REPO: '/r',
     })
     expect(env).toEqual({ HOME: '/h', PATH: '/bin', ANTHROPIC_API_KEY: 'k', TERM: 'xterm-256color' })
   })

@@ -249,10 +249,10 @@ test('MCP: no or a wrong token is rejected; with its token an agent lists, messa
     const cfgPath = r.runs()[0]!.argv.find((x) => x.startsWith('--mcp-config='))!.slice('--mcp-config='.length)
     expect(statSync(cfgPath).mode & 0o777).toBe(0o600)
     expect(cfgPath.startsWith(r.repo)).toBe(false)
-    const server = (JSON.parse(readFileSync(cfgPath, 'utf8')) as { mcpServers: Record<string, { env: Record<string, string> }> }).mcpServers['agent-canvas']!
+    const server = (JSON.parse(readFileSync(cfgPath, 'utf8')) as { mcpServers: Record<string, { env: Record<string, string> }> }).mcpServers['nodshell']!
     const ask = (payload: unknown) =>
       new Promise<{ result?: { tools?: { name: string }[] }; error?: { code: number } }>((done, fail) => {
-        const s = connect(server.env['AGENT_CANVAS_MCP_SOCKET']!)
+        const s = connect(server.env['NODSHELL_MCP_SOCKET']!)
         let buf = ''
         s.on('data', (c) => {
           buf += c.toString()
@@ -266,7 +266,7 @@ test('MCP: no or a wrong token is rejected; with its token an agent lists, messa
     const call = { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'send_message', arguments: { to: b, text: 'sneaky' } } }
     expect(await ask({ message: call })).toMatchObject({ error: { code: -32001 } })
     expect(await ask({ token: 'f'.repeat(64), message: call })).toMatchObject({ error: { code: -32001 } })
-    expect(await ask({ token: server.env['AGENT_CANVAS_MCP_TOKEN'], message: { jsonrpc: '2.0', id: 2, method: 'tools/list' } })).toMatchObject({ result: { tools: [{ name: 'list_agents' }, { name: 'send_message' }, { name: 'read_last_message' }, { name: 'report_status' }, { name: 'memory_read' }, { name: 'memory_write' }] } })
+    expect(await ask({ token: server.env['NODSHELL_MCP_TOKEN'], message: { jsonrpc: '2.0', id: 2, method: 'tools/list' } })).toMatchObject({ result: { tools: [{ name: 'list_agents' }, { name: 'send_message' }, { name: 'read_last_message' }, { name: 'report_status' }, { name: 'memory_read' }, { name: 'memory_write' }] } })
     await page.waitForTimeout(300)
     expect(r.runs().flatMap((x) => submissions(r.logs, x.pid))).toEqual([]) // nothing reached any agent
 

@@ -73,7 +73,7 @@ test('a goal typed into the Orchestrator makes it delegate to its squad: the cou
 test('spawn_agent: approved, the agent joins its group and gets the task; denied, nothing starts; at the process limit it is refused', async () => {
   test.setTimeout(240_000)
   const r = setupRepo()
-  const { app, page, errors } = await launch({ ...r.env, AGENT_CANVAS_TEST_SPAWN: 'yes,no,yes' })
+  const { app, page, errors } = await launch({ ...r.env, NODSHELL_TEST_SPAWN: 'yes,no,yes' })
   try {
     await squad(page)
     const orch = page.getByTestId('orchestrator-node')

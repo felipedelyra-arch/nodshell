@@ -160,7 +160,7 @@ test('console card: same header, pin blocks dragging, maximize and restore keep 
 test('closing a live agent asks first; keeping it leaves it running, confirming closes and cleans up', async () => {
   test.setTimeout(60_000)
   const r = setupRepo()
-  const { app, page, errors } = await launch({ ...r.env, AGENT_CANVAS_TEST_CLOSE: 'no,yes' })
+  const { app, page, errors } = await launch({ ...r.env, NODSHELL_TEST_CLOSE: 'no,yes' })
   try {
     await openRepo(page)
     await spawnAgent(page, 'builder', 'haiku', 1)
@@ -189,7 +189,7 @@ test('closing a live agent asks first; keeping it leaves it running, confirming 
 test('closing the window with a live agent asks first; keeping it leaves everything running', async () => {
   test.setTimeout(60_000)
   const r = setupRepo()
-  const { app, page, errors } = await launch({ ...r.env, AGENT_CANVAS_TEST_LEAVE: 'no' })
+  const { app, page, errors } = await launch({ ...r.env, NODSHELL_TEST_LEAVE: 'no' })
   try {
     await openRepo(page)
     await spawnAgent(page, 'builder', 'haiku', 1)
@@ -216,7 +216,7 @@ test('closing the window with a live agent asks first; keeping it leaves everyth
 test('closing asks nothing for an exited agent or an idle shell, and asks for a shell running a program', async () => {
   test.setTimeout(60_000)
   const r = setupRepo()
-  const { app, page, tmp, errors } = await launch({ ...r.env, AGENT_CANVAS_TEST_CLOSE: 'no' }) // every question is answered "no"
+  const { app, page, tmp, errors } = await launch({ ...r.env, NODSHELL_TEST_CLOSE: 'no' }) // every question is answered "no"
   try {
     await openRepo(page)
     await spawnAgent(page, 'builder', 'haiku', 1)

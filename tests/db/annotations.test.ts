@@ -12,7 +12,7 @@ let dir: string
 let db: Db
 let repo: SqliteAnnotationRepo
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'agent-canvas-ann-'))
+  dir = mkdtempSync(join(tmpdir(), 'nodshell-ann-'))
   db = openDatabase(join(dir, 'test.db'))
   repo = new SqliteAnnotationRepo(db)
 })

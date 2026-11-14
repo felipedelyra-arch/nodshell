@@ -97,7 +97,7 @@ test('workspaces: Close asks once for the whole workspace, ends only its termina
   test.setTimeout(180_000)
   const r = setupRepo()
   // "no" keeps everything, then "yes"; a third answer ("no") would stop a second agent if the question were asked per terminal
-  const { app, page, errors } = await launch({ ...r.env, AGENT_CANVAS_TEST_CLOSE: 'no,yes,no' })
+  const { app, page, errors } = await launch({ ...r.env, NODSHELL_TEST_CLOSE: 'no,yes,no' })
   try {
     await openRepo(page)
     await newConsole(page, 1)
@@ -157,7 +157,7 @@ test('project menu: keyboard, same folder changes nothing, another folder asks o
   test.setTimeout(180_000)
   const r = setupRepo()
   const r2 = setupRepo()
-  const { app, page, errors } = await launch({ ...r.env, AGENT_CANVAS_TEST_CLOSE: 'no,yes' })
+  const { app, page, errors } = await launch({ ...r.env, NODSHELL_TEST_CLOSE: 'no,yes' })
   try {
     await openRepo(page) // no project yet: the chip opens the folder dialog directly
     const chip = page.getByTestId('workspace')
@@ -192,7 +192,7 @@ test('project menu: keyboard, same folder changes nothing, another folder asks o
     await expect(page.getByRole('tab')).toHaveCount(2)
 
     // another folder: "no" keeps everything, "yes" ends it and starts clean
-    await app.evaluate((_e, dir) => void (process.env['AGENT_CANVAS_TEST_REPO'] = dir), r2.repo)
+    await app.evaluate((_e, dir) => void (process.env['NODSHELL_TEST_REPO'] = dir), r2.repo)
     await chip.click()
     await folder.click()
     await expect(menu).toHaveCount(0)
