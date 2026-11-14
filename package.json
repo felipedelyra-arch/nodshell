@@ -1,6 +1,6 @@
 {
   "name": "nodshell",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "Visual cockpit for coding agents running in real terminals",
   "main": "out/main/index.js",
@@ -38,6 +38,7 @@
   "dependencies": {
     "@fontsource-variable/jetbrains-mono": "5.3.0",
     "@xterm/addon-fit": "0.11.0",
+    "@xterm/addon-webgl": "0.19.0",
     "@xterm/xterm": "6.0.0",
     "@xyflow/react": "12.12.1",
     "better-sqlite3": "13.1.1",

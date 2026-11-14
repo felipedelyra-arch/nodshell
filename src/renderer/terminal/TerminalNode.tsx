@@ -1,5 +1,6 @@
-import { Handle, NodeResizer, Position, useStore, type NodeProps } from '@xyflow/react'
+import { Handle, NodeResizer, Position, useStore, useStoreApi, type NodeProps } from '@xyflow/react'
 import { FitAddon } from '@xterm/addon-fit'
+import { WebglAddon } from '@xterm/addon-webgl'
 import { Terminal } from '@xterm/xterm'
 import { memo, useEffect, useId, useRef, useState, type CSSProperties } from 'react'
 import { shallow } from 'zustand/shallow'
@@ -12,6 +13,8 @@ import { TailPreview } from './TailPreview'
 
 const CHUNK = 32768
 const ACK_EVERY = 50_000
+const FONT_PX = 11
+const DOM_RENDERER = new URLSearchParams(location.search).get('renderer') === 'dom' // set by main in tests only
 // semantic zoom: below this the card shows a text preview instead of a terminal; it comes back above LOW_ZOOM + hysteresis so it does not flicker
 export const LOW_ZOOM = 0.5
 const ZOOM_HYSTERESIS = 0.05
@@ -42,6 +45,28 @@ export const TerminalNode = memo(function TerminalNode({ id, data, selected, dra
   const lowZoom = useStore((s) => (wasLow.current = s.transform[2] < LOW_ZOOM + (wasLow.current ? ZOOM_HYSTERESIS : 0)))
   const showTerm = !lowZoom || selected || maximized || focused
   const termRef = useRef<Terminal | null>(null)
+  // Crisp text at any zoom: the terminal is drawn at the on-screen size (font and box scaled by the board zoom, then scaled back
+  // by 1/zoom), so its pixels are never resampled. Follows the zoom once it settles; a maximized card is already at scale 1.
+  const flow = useStoreApi()
+  const drawScaleRef = useRef(1)
+  const [settled, setSettled] = useState(() => flow.getState().transform[2])
+  useEffect(() => {
+    let t: ReturnType<typeof setTimeout> | undefined
+    const off = flow.subscribe((st) => {
+      clearTimeout(t)
+      t = setTimeout(() => setSettled(st.transform[2]), 150)
+    })
+    return () => {
+      clearTimeout(t)
+      off()
+    }
+  }, [flow])
+  const drawScale = maximized ? 1 : Math.min(2, Math.max(0.4, settled))
+  drawScaleRef.current = drawScale
+  useEffect(() => {
+    const term = termRef.current
+    if (term) term.options.fontSize = FONT_PX * drawScale // columns and rows stay: the box scales with the font
+  }, [drawScale])
   const restoreRef = useRef<(() => void) | null>(null)
   const activeBoard = useCanvas((st) => st.activeWorkspace === data.workspaceId)
   const paused = useCanvas((s) => s.paused) && isAlive(data) // Pause all holds the process: shown over its live state, which comes back on resume
@@ -80,10 +105,11 @@ export const TerminalNode = memo(function TerminalNode({ id, data, selected, dra
 
   useEffect(() => {
     const el = host.current
-    if (!el) return
+    const box = el?.parentElement
+    if (!el || !box) return
     const term = new Terminal({
       fontFamily: '"JetBrains Mono Variable", ui-monospace, monospace',
-      fontSize: 11,
+      fontSize: FONT_PX * drawScaleRef.current,
       cursorBlink: true,
       scrollback: 2000,
       theme: { background: '#0a0a0b', foreground: '#d4d4d8', cursor: '#ff6a2b', selectionBackground: 'rgb(255 106 43 / 0.35)', scrollbarSliderBackground: 'rgb(255 106 43 / 0.2)', scrollbarSliderHoverBackground: 'rgb(255 106 43 / 0.4)', scrollbarSliderActiveBackground: 'rgb(255 106 43 / 0.6)' },
@@ -91,9 +117,19 @@ export const TerminalNode = memo(function TerminalNode({ id, data, selected, dra
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(el)
+    // GPU renderer: it draws block and box characters itself, edge to edge (the DOM renderer leaves seams between cells).
+    // Falls back to the DOM renderer when WebGL is unavailable or the context is lost.
+    try {
+      if (DOM_RENDERER) throw new Error('DOM renderer requested')
+      const gl = new WebglAddon()
+      gl.onContextLoss(() => gl.dispose())
+      term.loadAddon(gl)
+    } catch {
+      // DOM renderer stays
+    }
     termRef.current = term
     restoreRef.current = () => {
-      if (el.clientWidth === 0 || el.clientHeight === 0) return
+      if (box.clientWidth === 0 || box.clientHeight === 0) return
       fit.fit()
       term.refresh(0, term.rows - 1)
     }
@@ -103,7 +139,7 @@ export const TerminalNode = memo(function TerminalNode({ id, data, selected, dra
     const refit = () => {
       clearTimeout(timer)
       timer = setTimeout(() => {
-        if (el.clientWidth === 0 || el.clientHeight === 0) return
+        if (box.clientWidth === 0 || box.clientHeight === 0) return
         fit.fit()
         if (term.cols === last.cols && term.rows === last.rows) return
         last = { cols: term.cols, rows: term.rows }
@@ -111,7 +147,7 @@ export const TerminalNode = memo(function TerminalNode({ id, data, selected, dra
       }, 60)
     }
     const ro = new ResizeObserver(refit)
-    ro.observe(el)
+    ro.observe(box) // the card's own box: a zoom change alone never refits (the PTY keeps its size)
     void document.fonts.load('11px "JetBrains Mono Variable"').finally(refit)
 
     const input = term.onData((d) => {
@@ -249,7 +285,9 @@ export const TerminalNode = memo(function TerminalNode({ id, data, selected, dra
           }}
         />
       )}
-      <div ref={host} className={`nodrag nowheel nopan min-h-0 flex-1 border-t border-white/10 bg-background ${showTerm ? '' : 'hidden'}`} data-testid="terminal-body" />
+      <div className={`nodrag nowheel nopan relative min-h-0 flex-1 overflow-hidden border-t border-white/10 bg-background ${showTerm ? '' : 'hidden'}`} data-testid="terminal-body">
+        <div ref={host} className="absolute left-0 top-0 origin-top-left" style={{ width: `${drawScale * 100}%`, height: `${drawScale * 100}%`, transform: `scale(${1 / drawScale})` }} />
+      </div>
       {!showTerm && activeBoard && <TailPreview term={termRef} exited={status === 'exited'} />}
 
     </div>

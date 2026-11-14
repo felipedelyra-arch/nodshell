@@ -78,6 +78,8 @@ const LOOP_MS_PER_SEC = Number.isInteger(loopMs) && loopMs >= 1 && loopMs <= 100
 
 const devUrl = process.env['ELECTRON_RENDERER_URL']
 const isDev = !app.isPackaged && !!devUrl
+// one WebGL context per terminal: Chromium's default of 16 is below the terminal limit (LIVE_HARD_MAX)
+app.commandLine.appendSwitch('max-active-webgl-contexts', '64')
 const appOrigin = isDev && devUrl ? new URL(devUrl).origin : 'app://app'
 const rendererDir = join(__dirname, '../renderer')
 
@@ -213,7 +215,9 @@ function createWindow(): void {
     icon: join(__dirname, '../renderer/icon.png'), // taskbar and window switcher, also when run without a desktop entry (AppImage)
     webPreferences: buildWebPreferences(join(__dirname, '../preload/index.js')),
   })
-  void win.loadURL(isDev && devUrl ? devUrl : 'app://app/index.html')
+  // tests read terminal text from the page, which only the DOM renderer provides
+  const dom = !app.isPackaged && process.env['NODSHELL_TEST_DOM'] === '1' ? '?renderer=dom' : ''
+  void win.loadURL(isDev && devUrl ? devUrl : `app://app/index.html${dom}`)
 }
 
 void app.whenReady().then(async () => {
