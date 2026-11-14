@@ -1,6 +1,6 @@
 {
   "name": "nodshell",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Visual cockpit for coding agents running in real terminals",
   "main": "out/main/index.js",

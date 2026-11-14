@@ -210,6 +210,7 @@ function createWindow(): void {
     width: 1280,
     height: 800,
     backgroundColor: '#0a0a0b',
+    icon: join(__dirname, '../renderer/icon.png'), // taskbar and window switcher, also when run without a desktop entry (AppImage)
     webPreferences: buildWebPreferences(join(__dirname, '../preload/index.js')),
   })
   void win.loadURL(isDev && devUrl ? devUrl : 'app://app/index.html')

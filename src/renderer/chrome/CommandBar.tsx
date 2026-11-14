@@ -87,16 +87,7 @@ export function CommandBar() {
 
   return (
     <div ref={bar} className="cmd-bar pointer-events-auto" role="group" aria-label="Command bar">
-      <svg className="cmd-logo" width="28" height="28" viewBox="0 0 28 28" aria-hidden="true">
-        <defs>
-          <radialGradient id={`${tipId}-g`} cx="35%" cy="30%" r="80%">
-            <stop offset="0" stopColor="#ffb27a" />
-            <stop offset="1" stopColor="#e2561a" />
-          </radialGradient>
-        </defs>
-        <circle cx="14" cy="14" r="13" fill={`url(#${tipId}-g)`} />
-        <path d="M9 11.5h10M9 16.5h6" stroke="#2a1206" strokeWidth="2" strokeLinecap="round" />
-      </svg>
+      <img className="cmd-logo" src="icon-mark.png" width="28" height="28" alt="" />
       <CommandInput fieldKey={GLOBAL} scope={scope} names={names} placeholder="Hold space to speak · @ to direct…" label="Command" wrapClass="cmd-field" />
       <span id={tipId} className="sr-only">
         {VOICE_TIP}

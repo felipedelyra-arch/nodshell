@@ -56,7 +56,8 @@ export function AboutDialog({ onClose }: { onClose: () => void }) {
   const d = useDiagnostics()
   return (
     <AppDialog label="About" onClose={onClose}>
-      <p className="mt-3 text-sm text-text">
+      <p className="mt-3 flex items-center gap-2 text-sm text-text">
+        <img src="icon-mark.png" width="24" height="24" alt="" />
         NodShell <span className="font-mono text-muted">{d ? d.version : ''}</span>
       </p>
       <LiveLimitField />
