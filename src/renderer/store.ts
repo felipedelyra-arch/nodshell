@@ -87,7 +87,7 @@ type State = {
   closeTerminals: () => Promise<void>
   spawnMany: (presetId: string, count: number) => Promise<boolean>
   /** resolves to an error message, or null when the squad is on the board */
-  createSquad: () => Promise<string | null>
+  createSquad: (perGroup: number) => Promise<string | null>
   createGroup: (name: string) => Promise<boolean>
   ungroup: (groupId: string) => Promise<void>
   toggleGroup: (groupId: string, collapsed: boolean) => void
@@ -384,10 +384,10 @@ export const useCanvas = create<State>((set, get) => {
       }
     },
 
-    createSquad: async () => {
+    createSquad: async (perGroup) => {
       const from = get().activeWorkspace
       try {
-        const r = await window.api.invoke('squad:create', { cols: 80, rows: 24, workspaceId: from })
+        const r = await window.api.invoke('squad:create', { cols: 80, rows: 24, workspaceId: from, perGroup })
         const ws = target(from)
         set((s) => ({ nodes: withEarly(addSquad(s.nodes, r, Date.now(), ws)), fitTick: ws === s.activeWorkspace ? s.fitTick + 1 : s.fitTick }))
         upsert(r.edges)

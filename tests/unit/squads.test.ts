@@ -75,8 +75,21 @@ describe('createSquad', () => {
     expect(r.edges.map((e) => [e.source, e.target])).toEqual(r.groups.map((g) => [{ kind: 'group', id: g.id }, { kind: 'squad', id: 'q1' }]))
     expect(groups.size).toBe(4)
     expect(squads.forget(r.orchestrator.id)?.id).toBe('q1')
-    // squad groups are not preset groups: Spawn N never joins them
-    for (const p of presets) expect(groups.findByPreset(1, p.id)).toBeUndefined()
+    // each squad group is its preset's group: Spawn N of that preset adds agents to it
+    for (const g of r.groups) expect(groups.findByPreset(1, presets.find((p) => p.name === g.name)!.id)?.id).toBe(g.id)
+  })
+  it('a small squad starts one agent per group, and Spawn N of a role preset joins that group', async () => {
+    const { d, spawn, groups } = deps({ free: 5 })
+    const r = await createSquad(d, 1, repo, { cols: 80, rows: 24 }, 1)
+    expect(spawn).toHaveBeenCalledTimes(5)
+    expect(r.groups.map((g) => g.memberIds.length)).toEqual([1, 1, 1, 1])
+    expect([r.agents.length, r.failed, r.edges.length]).toEqual([4, 0, 4])
+    const front = presets.find((p) => p.role === 'frontend')!
+    const { d: roomy } = deps()
+    const more = await spawnMany({ presets: { get: () => front }, agents: roomy.agents, groups: d.groups, slots: roomy.slots }, 1, repo, { presetId: front.id, count: 1, cols: 80, rows: 24 })
+    expect(more.group.id).toBe(r.groups[0]!.id)
+    expect(more.group.memberIds).toHaveLength(2)
+    expect(groups.size).toBe(4)
   })
   it('refuses without room for nine before creating anything', async () => {
     const { d, spawn, groups } = deps({ free: 8 })

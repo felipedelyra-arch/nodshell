@@ -168,9 +168,9 @@ export const channels = {
     out: z.object({ id, name: groupName }),
   },
   'group:dissolve': { in: z.object({ id }), out: ok },
-  // a squad from the built-in presets: the renderer sends only the terminal size, never a role, path or command
+  // a squad from the built-in presets: the renderer sends only the terminal size and how many agents each group starts with, never a role, path or command
   'squad:create': {
-    in: z.object({ cols, rows, workspaceId: id }),
+    in: z.object({ cols, rows, workspaceId: id, perGroup: z.number().int().min(1).max(SQUAD_GROUP_SIZE) }),
     out: z.object({
       squad: z.object({ id, orchestratorId: id, groupIds: z.array(id).max(SQUAD_ROLES.length) }),
       orchestrator: agentInfo,

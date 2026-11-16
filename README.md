@@ -7,7 +7,7 @@ Linux only for now.
 ## Features
 
 - **Real terminals on a canvas.** Each card is a PTY running Claude Code (or a plain shell), with live status taken from the CLI's own hooks: running, resting, needs you.
-- **Squads.** One click creates an Orchestrator plus four groups of two agents (Frontend, Backend, Testers, Reviewers), each agent in its own git worktree and branch.
+- **Squads.** One click creates an Orchestrator plus four groups (Frontend, Backend, Testers, Reviewers) of one or two agents each, every agent in its own git worktree and branch. Spawning more agents of a role adds them to that group.
 - **Flows.** Draw an edge between agents or groups: when the source finishes a turn, its last message is delivered to the target through a template. Hop, loop and burst guards stop runaway chains, and Pause all freezes every flow and process.
 - **Delegation.** The Orchestrator talks to its squad through a local MCP bridge (`list_agents`, `send_message`, `spawn_agent`, ...). Spawning a new agent always asks you first.
 - **Command bar.** `@name` or `@group` routes a prompt; without a prefix it goes to the Orchestrator. Optional push-to-talk dictation types into the field and never sends on its own.
@@ -28,14 +28,14 @@ Download the latest package from the [Releases](https://github.com/felipedelyra-
 **Debian / Ubuntu**
 
 ```sh
-sudo apt install ./nodshell-0.1.3-amd64.deb
+sudo apt install ./nodshell-0.1.4-amd64.deb
 ```
 
 **AppImage**
 
 ```sh
-chmod +x nodshell-0.1.3-x86_64.AppImage
-./nodshell-0.1.3-x86_64.AppImage
+chmod +x nodshell-0.1.4-x86_64.AppImage
+./nodshell-0.1.4-x86_64.AppImage
 ```
 
 The AppImage needs FUSE 2 (`libfuse2`, or `libfuse2t64` on recent Ubuntu releases).
@@ -43,7 +43,7 @@ The AppImage needs FUSE 2 (`libfuse2`, or `libfuse2t64` on recent Ubuntu release
 ## Getting started
 
 1. Pick a git repository with the project dropdown in the top bar.
-2. Open **Presets → Layouts → Squad** for a full squad, or use **Spawn 4** / **New console** for a few stand-alone terminals. A squad is optional.
+2. Open **Presets → Layouts** and pick **Small squad** (5 agents) or **Squad** (9 agents), or use **Spawn 4** / **New console** for a few stand-alone terminals. A squad is optional.
 3. Answer Claude Code's "trust this folder" prompt in each terminal. The app never answers it for you.
 4. Type a goal in the command bar and press Enter.
 

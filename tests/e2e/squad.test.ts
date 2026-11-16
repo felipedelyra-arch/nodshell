@@ -225,3 +225,29 @@ test('without a squad: consoles, Spawn N and Group work as before; the Squad lay
     await app.close()
   }
 })
+
+test('Small squad: Orchestrator and four groups of one; Spawn of a role preset adds an agent to that squad group', async () => {
+  test.setTimeout(120_000)
+  const r = setupRepo()
+  const { app, page } = await launch(r.env)
+  try {
+    await openRepo(page)
+    await page.getByRole('button', { name: 'Presets', exact: true }).click()
+    await page.getByRole('dialog', { name: 'Presets' }).getByRole('list', { name: 'Layouts' }).getByRole('button', { name: /^Small squad/ }).click()
+    await expect(page.getByTestId('agent-node')).toHaveCount(5)
+    await expect.poll(() => r.runs().length, { timeout: 60_000 }).toBe(5)
+    const orch = page.getByTestId('orchestrator-node')
+    await expect(orch.getByTestId('orch-summary')).toHaveText('4 agents · 4 groups')
+    await expect(orch.getByTestId('orch-section')).toHaveText([/BACKEND\s*1/, /REVIEWERS\s*1/, /FRONTEND\s*1/, /TESTERS\s*1/])
+    await expect(page.locator('.react-flow__edge-flow')).toHaveCount(4)
+    // my call: a second Frontend agent, into the squad's FRONTEND group
+    await spawnPreset(page, 'Frontend', 1)
+    await expect(page.getByTestId('agent-node')).toHaveCount(6)
+    await expect(page.locator('.react-flow__node-group')).toHaveCount(4)
+    await expect(orch.getByTestId('orch-summary')).toHaveText('5 agents · 4 groups')
+    await expect(orch.getByTestId('orch-section')).toHaveText([/BACKEND\s*1/, /REVIEWERS\s*1/, /FRONTEND\s*2/, /TESTERS\s*1/])
+    await page.screenshot({ path: `${process.env['SHOT_DIR'] ?? 'test-results'}/small-squad.png` })
+  } finally {
+    await app.close()
+  }
+})

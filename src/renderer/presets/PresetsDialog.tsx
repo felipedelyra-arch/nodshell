@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
-import { MODEL_CHOICES, PROMPT_MAX, SQUAD_SIZE, type ModelChoice } from '../../shared/agent'
+import { MODEL_CHOICES, PROMPT_MAX, SQUAD_GROUP_SIZE, SQUAD_ROLES, type ModelChoice } from '../../shared/agent'
 import { PRESET_NAME_MAX, validatePreset, type PresetErrors, type PresetFields } from '../../shared/preset'
 import { useCanvas } from '../store'
 import { usePresets, type PresetDto } from './store'
@@ -22,7 +22,7 @@ export function PresetsDialog({ onClose }: { onClose: () => void }) {
   const [busy, setBusy] = useState(false)
   const repo = useCanvas((s) => s.repo)
   const createSquad = useCanvas((s) => s.createSquad)
-  const [squadState, setSquadState] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null })
+  const [squadState, setSquadState] = useState<{ busy: number | false; error: string | null }>({ busy: false, error: null })
   const root = useRef<HTMLDivElement>(null)
   const nameInput = useRef<HTMLInputElement>(null)
   const deleteBtn = useRef<HTMLButtonElement>(null)
@@ -73,10 +73,10 @@ export function PresetsDialog({ onClose }: { onClose: () => void }) {
 
   const restoring = useCanvas((s) => s.restoring)
   const squadTip = !repo ? 'Open a repository first' : restoring ? 'Wait for the board to finish restoring' : undefined
-  const onSquad = async () => {
+  const onSquad = async (perGroup: number) => {
     if (squadTip || squadState.busy) return
-    setSquadState({ busy: true, error: null })
-    const error = await createSquad()
+    setSquadState({ busy: perGroup, error: null })
+    const error = await createSquad(perGroup)
     setSquadState({ busy: false, error })
     if (!error) onClose()
   }
@@ -141,27 +141,29 @@ export function PresetsDialog({ onClose }: { onClose: () => void }) {
               Layouts
             </h3>
             <ul className="m-0 list-none p-0" aria-label="Layouts">
-              <li>
-                <button
-                  type="button"
-                  className="preset-item flex-col !items-start"
-                  aria-disabled={squadTip || squadState.busy ? true : undefined}
-                  aria-busy={squadState.busy || undefined}
-                  aria-describedby={`${ids}-squad-desc${squadTip ? ` ${ids}-squad-tip` : ''}`}
-                  data-tip={squadTip}
-                  onClick={() => void onSquad()}
-                >
-                  <span>Squad</span>
-                  <span id={`${ids}-squad-desc`} className="text-[9px] text-muted">
-                    {squadState.busy ? `Starting ${SQUAD_SIZE} agents…` : 'Orchestrator + 4 groups of 2'}
-                  </span>
-                </button>
-                {squadTip && (
-                  <span id={`${ids}-squad-tip`} className="sr-only">
-                    {squadTip}
-                  </span>
-                )}
-              </li>
+              {([['Small squad', 1], ['Squad', SQUAD_GROUP_SIZE]] as const).map(([label, perGroup]) => (
+                <li key={label}>
+                  <button
+                    type="button"
+                    className="preset-item flex-col !items-start"
+                    aria-disabled={squadTip || squadState.busy ? true : undefined}
+                    aria-busy={squadState.busy === perGroup || undefined}
+                    aria-describedby={`${ids}-squad-desc-${perGroup}${squadTip ? ` ${ids}-squad-tip` : ''}`}
+                    data-tip={squadTip}
+                    onClick={() => void onSquad(perGroup)}
+                  >
+                    <span>{label}</span>
+                    <span id={`${ids}-squad-desc-${perGroup}`} className="text-[9px] text-muted">
+                      {squadState.busy === perGroup ? `Starting ${1 + SQUAD_ROLES.length * perGroup} agents…` : `Orchestrator + 4 groups of ${perGroup}${perGroup === 1 ? ', add more with Spawn' : ''}`}
+                    </span>
+                  </button>
+                </li>
+              ))}
+              {squadTip && (
+                <li id={`${ids}-squad-tip`} className="sr-only">
+                  {squadTip}
+                </li>
+              )}
             </ul>
             {squadState.error && (
               <p role="alert" className="field-hint field-hint-error" data-testid="layout-error">

@@ -1095,11 +1095,11 @@ void app.whenReady().then(async () => {
       return { id: g.id, name: g.name }
     }),
   )
-  handle('squad:create', appOrigin, ({ cols, rows, workspaceId }, { senderId }) =>
+  handle('squad:create', appOrigin, ({ cols, rows, workspaceId, perGroup }, { senderId }) =>
     safe('Could not start the squad', async () => {
       notRestoring()
       notPaused(senderId)
-      const r = await createSquad({ presets: needPresets(), agents, groups, squads, slots, flow }, senderId, repo, { cols, rows, workspaceId })
+      const r = await createSquad({ presets: needPresets(), agents, groups, squads, slots, flow }, senderId, repo, { cols, rows, workspaceId }, perGroup)
       return { ...r, edges: r.edges.map(edgeDto) }
     }),
   )

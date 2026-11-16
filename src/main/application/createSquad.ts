@@ -1,6 +1,6 @@
 import { AgentError, type Repo } from '../domain/agent'
 import type { Preset } from '../domain/preset'
-import { SQUAD_GROUP_SIZE, SQUAD_ROLES, SQUAD_SIZE, type SquadRole } from '../domain/squad'
+import { SQUAD_GROUP_SIZE, SQUAD_ROLES, type SquadRole } from '../domain/squad'
 import type { Edge } from '../domain/edge'
 import type { SpawnedAgent } from './agents'
 import type { FlowEngine } from './flow'
@@ -20,36 +20,37 @@ export type SquadResult = {
 }
 
 /**
- * CreateSquad: an Orchestrator plus one new group of SQUAD_GROUP_SIZE per squad role, from the built-in presets.
+ * CreateSquad: an Orchestrator plus one new group of `perGroup` agents (1 to SQUAD_GROUP_SIZE) per squad role, from the built-in presets.
+ * Each group carries its preset, so Spawn N of that preset adds agents to it later.
  * Refuses before anything is created when there is no room for the whole squad. If the Orchestrator fails nothing else starts;
  * after that, like Spawn N, the agents that started stay and failures are counted (a group with no agent is not created).
  */
-export async function createSquad(d: SquadDeps, ownerId: number, repo: Repo | null, size: SpawnSize): Promise<SquadResult> {
+export async function createSquad(d: SquadDeps, ownerId: number, repo: Repo | null, size: SpawnSize, perGroup: number = SQUAD_GROUP_SIZE): Promise<SquadResult> {
   if (!repo) throw new AgentError('Open a repository first')
   const builtin = (role: string) => d.presets.list().find((p) => p.builtin && p.role === role)
   const lead = builtin('orchestrator')
   const members = SQUAD_ROLES.map((role) => ({ role, preset: builtin(role) }))
   if (!lead || members.some((m) => !m.preset)) throw new AgentError('The built-in presets for a squad are missing')
-  const slots = d.slots.reserve(SQUAD_SIZE)
+  const total = 1 + SQUAD_ROLES.length * perGroup
+  const slots = d.slots.reserve(total)
   const started: { role: SquadRole; preset: Preset; agents: SpawnedAgent[] }[] = []
   let orchestrator: SpawnedAgent
   try {
     orchestrator = await d.agents.spawn(ownerId, repo, presetRequest(lead, size))
     slots.use()
-    for (const { role, preset } of members) started.push({ role, preset: preset!, agents: (await spawnBatch(d, ownerId, repo, preset!, SQUAD_GROUP_SIZE, size, slots)).agents })
+    for (const { role, preset } of members) started.push({ role, preset: preset!, agents: (await spawnBatch(d, ownerId, repo, preset!, perGroup, size, slots)).agents })
   } finally {
     slots.release()
   }
   // from here nothing may throw: the agents run and need their cards, even one whose process already exited
   const groups: SquadResult['groups'] = []
   for (const { role, preset, agents } of started.filter((x) => x.agents.length > 0)) {
-    // no preset id: Spawn N never adds cards to a squad's group
-    const g = d.groups.create(ownerId, preset.name, agents.map((a) => a.id), { spawned: true })
+    const g = d.groups.create(ownerId, preset.name, agents.map((a) => a.id), { presetId: preset.id, spawned: true, workspaceId: size.workspaceId })
     groups.push({ id: g.id, name: g.name, role, memberIds: [...g.memberIds] })
   }
   const agents = started.flatMap((x) => x.agents)
   const s = d.squads.create(ownerId, orchestrator.id, groups.map((g) => g.id))
-  return { squad: { id: s.id, orchestratorId: s.orchestratorId, groupIds: [...s.groupIds] }, orchestrator, groups, agents, edges: connectSquad(d.flow, ownerId, s, []), failed: SQUAD_SIZE - 1 - agents.length }
+  return { squad: { id: s.id, orchestratorId: s.orchestratorId, groupIds: [...s.groupIds] }, orchestrator, groups, agents, edges: connectSquad(d.flow, ownerId, s, []), failed: total - 1 - agents.length }
 }
 
 /**

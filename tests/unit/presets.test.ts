@@ -66,10 +66,11 @@ describe('preset channel schemas', () => {
   })
   it('validates the squad channel: only a terminal size in, known roles and bounded groups out', () => {
     const sq = channels['squad:create']
-    expect(sq.in.safeParse({ cols: 80, rows: 24, workspaceId: id }).success).toBe(true)
-    expect(sq.in.safeParse({ cols: 80, rows: 24 }).success).toBe(false) // the agents need their workspace
-    expect(sq.in.safeParse({ cols: 1, rows: 24, workspaceId: id }).success).toBe(false)
-    expect(sq.in.safeParse({ cols: 80, rows: 24, workspaceId: id, role: 'x' }).data).toEqual({ cols: 80, rows: 24, workspaceId: id }) // extra fields never reach main
+    expect(sq.in.safeParse({ cols: 80, rows: 24, workspaceId: id, perGroup: 1 }).success).toBe(true)
+    expect(sq.in.safeParse({ cols: 80, rows: 24, perGroup: 2 }).success).toBe(false) // the agents need their workspace
+    expect(sq.in.safeParse({ cols: 1, rows: 24, workspaceId: id, perGroup: 2 }).success).toBe(false)
+    for (const perGroup of [0, 3, 1.5]) expect(sq.in.safeParse({ cols: 80, rows: 24, workspaceId: id, perGroup }).success).toBe(false)
+    expect(sq.in.safeParse({ cols: 80, rows: 24, workspaceId: id, perGroup: 2, role: 'x' }).data).toEqual({ cols: 80, rows: 24, workspaceId: id, perGroup: 2 }) // extra fields never reach main
     const agent = { id, name: 'Zoe', role: 'orchestrator', branch: 'agent/orchestrator-1', model: 'default', state: 'starting', statusUnavailable: false }
     const edge = { id, workspaceId: id, source: { kind: 'group', id }, target: { kind: 'squad', id }, template: 'From {name}', condition: '', paused: null, note: null }
     const out = { squad: { id, orchestratorId: id, groupIds: [id] }, orchestrator: agent, groups: [{ id, name: 'Frontend', role: 'frontend', memberIds: [id, id] }], agents: [agent], edges: [edge], failed: 0 }
