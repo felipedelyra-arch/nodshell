@@ -23,7 +23,7 @@ export async function launch(extraEnv: Record<string, string> = {}): Promise<Lau
   const app = await electron.launch({
     args: ['.'],
     // closing live processes is confirmed unless a test scripts the answer
-    env: { ...process.env, HOME: tmp, NODSHELL_USER_DATA: join(tmp, 'userdata'), NODSHELL_TEST_CLOSE: 'yes', NODSHELL_TEST_LEAVE: 'yes', NODSHELL_TEST_DOM: '1', ...extraEnv }, // DOM renderer: the tests read the terminal text from the page
+    env: { ...process.env, HOME: tmp, NODSHELL_USER_DATA: join(tmp, 'userdata'), NODSHELL_TEST_CLOSE: 'yes', NODSHELL_TEST_LEAVE: 'yes', NODSHELL_TEST_DOM: '1', NODSHELL_TEST_AVAIL_MB: '65536', ...extraEnv }, // DOM renderer: the tests read the terminal text from the page
   })
   const page = await app.firstWindow()
   const errors: string[] = []

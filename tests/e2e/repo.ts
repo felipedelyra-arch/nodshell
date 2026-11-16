@@ -180,7 +180,7 @@ export function setupRepo() {
 
 
 export async function openRepo(page: Page): Promise<void> {
-  await page.getByRole('button', { name: 'Open repository' }).click()
+  await page.getByRole('button', { name: 'Open folder' }).click()
   await expect(page.getByTestId('repo-badge')).toHaveText('main')
 }
 

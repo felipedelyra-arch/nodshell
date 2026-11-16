@@ -16,15 +16,15 @@ import { HandoffService, type Handoff } from './application/handoff'
 import type { Loop, SavedLoop } from './domain/loop'
 import { SqliteLoopRepo } from './infrastructure/db/loops'
 import { callTool, toolList, type ToolDeps } from './application/mcpTools'
-import { Slots, spawnMany } from './application/spawnMany'
+import { AGENT_BYTES, RESERVE_BYTES, Slots, spawnMany } from './application/spawnMany'
 import { SquadSpawner, type SpawnQuestion } from './application/spawnAgent'
 import { SquadRegistry } from './application/squads'
 import { TaskBoard } from './application/tasks'
 import { AgentError, type Agent, type ConfirmDiscard, type RemovalOutcome, type Repo } from './domain/agent'
 import type { Edge } from './domain/edge'
 import { cleanLine } from './domain/task'
-import { hasTerminals, type RestoreChoice, type SavedAgent, type SavedBoard, type SavedNode } from './domain/board'
-import { acceptLayout, buildSnapshot, restoreNotice, sanitizeBoard, staleWorkspaces, type Layout } from './application/board'
+import { hasTerminals, type RestoreChoice, type SavedBoard } from './domain/board'
+import { acceptLayout, buildSnapshot, type Pending, restoreNotice, sanitizeBoard, savedAgentProblem, staleWorkspaces, type Layout } from './application/board'
 import { boardView, discardWorktrees, layoutOf, restoreBoard, type Restored } from './application/restore'
 import { agentMemory, MemoryService } from './application/memory'
 import { SqliteBoardRepo } from './infrastructure/db/board'
@@ -49,7 +49,7 @@ import { McpService } from './infrastructure/mcp/config'
 import { McpServer } from './infrastructure/mcp/server'
 import { PAUSED_MESSAGE, PtyManager } from './infrastructure/pty/manager'
 import { spawnNodePty } from './infrastructure/pty/nodePty'
-import { sessionRss } from './infrastructure/pty/session'
+import { availableBytes, sessionRss } from './infrastructure/pty/session'
 import { which } from './infrastructure/which'
 import { handle } from './ipc/router'
 import { IpcError } from './ipc/validate'
@@ -186,25 +186,29 @@ async function confirmLeave(win: BrowserWindow | null): Promise<boolean> {
   return r.response === 1
 }
 
-// Test-only: scripted answer ("resume"/"fresh"/"empty") instead of the restore dialog; ignored in packaged builds.
+// Test-only: the memory the system reports as available, in MiB; ignored in packaged builds.
+const testAvailMb = app.isPackaged ? NaN : Number(process.env['NODSHELL_TEST_AVAIL_MB'] ?? NaN)
+const availBytes = () => (Number.isFinite(testAvailMb) ? testAvailMb * 2 ** 20 : availableBytes())
+
+// Test-only: scripted answer ("resume"/"choose"/"fresh"/"empty") instead of the restore dialog; ignored in packaged builds.
 const restoreAnswer = app.isPackaged ? undefined : process.env['NODSHELL_TEST_RESTORE']
 
 /** Native dialog when a project with a saved board opens; "Resume conversations" is the default and also what Esc means. */
 async function askRestore(senderId: number, terminals: number): Promise<RestoreChoice> {
-  if (restoreAnswer === 'resume' || restoreAnswer === 'fresh' || restoreAnswer === 'empty') return restoreAnswer
+  if (restoreAnswer === 'resume' || restoreAnswer === 'choose' || restoreAnswer === 'fresh' || restoreAnswer === 'empty') return restoreAnswer
   const opts: MessageBoxOptions = {
     type: 'question',
-    buttons: ['Resume conversations', 'Start fresh', 'Empty board'],
+    buttons: ['Resume conversations', 'Choose terminals…', 'Start fresh', 'Empty board'],
     defaultId: 0,
     cancelId: 0,
     noLink: true,
     title: 'Saved board',
     message: `This project has a saved board with ${terminals} terminal${terminals === 1 ? '' : 's'}.`,
-    detail: 'Resume conversations relaunches each agent in its own worktree and continues its session. Start fresh relaunches them with new sessions. Empty board discards the saved board and cleans up the agent worktrees (uncommitted work is only discarded if you confirm).',
+    detail: 'Resume conversations relaunches each agent in its own worktree and continues its session. Choose terminals lets you pick which ones come back; the rest stay saved. Start fresh relaunches them with new sessions. Empty board discards the saved board and cleans up the agent worktrees (uncommitted work is only discarded if you confirm).',
   }
   const win = windowOf(senderId)
   const r = win ? await dialog.showMessageBox(win, opts) : await dialog.showMessageBox(opts)
-  return r.response === 1 ? 'fresh' : r.response === 2 ? 'empty' : 'resume'
+  return (['resume', 'choose', 'fresh', 'empty'] as const)[r.response] ?? 'resume'
 }
 
 function createWindow(): void {
@@ -328,7 +332,7 @@ void app.whenReady().then(async () => {
   const injected = new Map<string, number>() // per agent: app deliveries whose UserPromptSubmit has not come back yet
   const groups = new GroupRegistry((ownerId, id) => ptys.owns(ownerId, id), randomUUID)
   const squads = new SquadRegistry(randomUUID)
-  const slots = new Slots(() => ptys.size, () => ptys.limit)
+  const slots = new Slots(() => ptys.size, () => ptys.limit, availBytes)
   const reasonText = (r: string) => cleanLine(r).slice(0, REASON_MAX) // reasons may name what an agent sent; shown in toasts and the editor
   const edgeDto = (e: Edge) => ({ id: e.id, workspaceId: e.workspaceId, source: { ...e.source }, target: { ...e.target }, template: e.template, condition: e.condition, paused: e.paused === null ? null : reasonText(e.paused), note: e.note === null ? null : reasonText(e.note) })
   const flowState = (o: number) => send(o, 'flow:changed', { edges: flow.list(o).map(edgeDto), paused: ptys.isStopped(o), flowsPaused: flow.flowsPaused(o) })
@@ -346,10 +350,7 @@ void app.whenReady().then(async () => {
       groupOf: (id) => groups.groupOf(id),
       squad: (o, id) => squads.get(o, id),
       // only the reply itself, from the transcript: a scrape of the terminal is never passed on to another agent
-      lastMessage: async (o, id) => {
-        const m = await agents.lastMessage(o, id)
-        return m.source === 'transcript' ? m.text : null
-      },
+      lastMessage: (o, id) => agents.turnReply(o, id),
       readiness: (o, id) => (ptys.isStopped(o) ? { refused: 'is paused' } : agents.readiness(o, id)),
       // Pause all is checked again inside the PTY's queue, before the paste and before the Enter
       // each delivery is one submission the CLI will report: counted, so it is never taken for the user's own prompt
@@ -387,10 +388,7 @@ void app.whenReady().then(async () => {
       // an agent knows its workspace; a console's is the renderer's last layout (of the open project)
       workspaceOf: (o, id) => agents.get(o, id)?.workspaceId ?? (ptys.owns(o, id) && (target === null || target.ownerId === o) ? layout?.nodes.find((n) => n.id === id)?.workspaceId : undefined),
       // only the reply itself, from the transcript (a scrape of the screen would also show the prompt, goal included)
-      lastMessage: async (o, id) => {
-        const m = await agents.lastMessage(o, id)
-        return m.source === 'transcript' ? m.text : null
-      },
+      lastMessage: (o, id) => agents.turnReply(o, id),
       fire: (o, id, text, tag) => flow.loopPrompt(o, id, text, tag),
       withdraw: (id, tag) => flow.withdraw(id, tag),
       now: Date.now,
@@ -432,10 +430,7 @@ void app.whenReady().then(async () => {
         if (agents.get(o, id)?.state === 'idle') flow.unmute(id)
       },
       // only the reply itself, from the transcript (a scrape of the screen would also show the request)
-      lastMessage: async (o, id) => {
-        const m = await agents.lastMessage(o, id)
-        return m.source === 'transcript' ? m.text : null
-      },
+      lastMessage: (o, id) => agents.turnReply(o, id),
       // the flow engine's queue: a new chain, written only while the agent rests, held while paused, counted by the burst guard
       deliver: (o, id, text, tag) => flow.loopPrompt(o, id, text, tag),
       setTimer: (fn, ms) => setTimeout(fn, ms),
@@ -542,7 +537,8 @@ void app.whenReady().then(async () => {
   // coming back never overwrites the saved one.
   let target: { ownerId: number; root: string } | null = null
   let layout: Layout | null = null
-  let pending: { agents: SavedAgent[]; nodes: SavedNode[] } | undefined // saved agents that did not come back: kept on the saved board
+  let pending: Pending | undefined // saved agents that did not come back: kept on the saved board
+  let pendingLoops: SavedLoop[] = [] // their loops, saved again as they were
   let saveTimer: NodeJS.Timeout | undefined
   let restoring = false
   const known = (o: number, id: string) => agents.has(o, id) || ptys.owns(o, id) || !!groups.get(o, id) || !!squads.get(o, id) || tiles.owns(o, id)
@@ -561,7 +557,7 @@ void app.whenReady().then(async () => {
     try {
       boards.save(target.root, snapshot(target.ownerId))
       webTileRepo?.replace(target.root, savedTiles(target.ownerId))
-      loopRepo?.replace(target.root, loops.list(target.ownerId).map(savedLoop))
+      loopRepo?.replace(target.root, [...loops.list(target.ownerId).map(savedLoop), ...pendingLoops])
     } catch {
       // the next change tries again; nothing about the board is logged
     }
@@ -573,6 +569,7 @@ void app.whenReady().then(async () => {
     target = { ownerId, root }
     layout = l
     pending = p
+    if (!p) pendingLoops = []
     try {
       boards?.touch(root) // the project reopened at the next start
     } catch {
@@ -586,6 +583,7 @@ void app.whenReady().then(async () => {
     target = null
     layout = null
     pending = undefined
+    pendingLoops = []
   }
   // the last save before leaving waits (briefly) for the renderer's current layout
   const flushWaiters: (() => void)[] = []
@@ -678,7 +676,7 @@ void app.whenReady().then(async () => {
 
   handle('ping', appOrigin, ({ message }) => ({ reply: `pong: ${message}`, at: Date.now() }))
   handle('pty:spawn', appOrigin, ({ cols, rows }, { senderId }) => {
-    if (slots.free() < 1) throw new IpcError(`Terminal limit reached (${ptys.limit})`) // slots held by a running batch count too
+    if (slots.freeOfLimit() < 1) throw new IpcError(`Terminal limit reached (${ptys.limit})`) // slots held by a running batch count too
     const r = ptys.spawn(senderId, cols, rows)
     persist()
     return r
@@ -800,7 +798,7 @@ void app.whenReady().then(async () => {
         const l = layoutOf(board0)
         l.nodes.push(...tileLayout(webTiles))
         attach(senderId, r.root, l)
-        const empty: Restored = { cancelled: false, board: board0, agents: new Map(), consoles: new Map(), ids: new Map(), skipped: [], pending: { agents: [], nodes: [] } }
+        const empty: Restored = { cancelled: false, board: board0, agents: new Map(), consoles: new Map(), ids: new Map(), skipped: [], pending: { agents: [], nodes: [], groups: [], squads: [], edges: [] } }
         return { board: boardView(empty, []), annotations: drawn, webTiles, notice: droppedNote }
       }
       attach(senderId, r.root, null)
@@ -814,6 +812,8 @@ void app.whenReady().then(async () => {
     restoring = true
     try {
       const choice = await askRestore(senderId, saved.nodes.filter((n) => n.kind === 'agent' || n.kind === 'console').length)
+      if (cancelled()) return none
+      const only = choice === 'choose' ? await chooseTerminals(senderId, saved) : undefined
       if (cancelled()) return none
       if (choice === 'empty') {
         const left = await discardWorktrees({ worktrees }, r, saved, confirmFor(senderId))
@@ -861,7 +861,8 @@ void app.whenReady().then(async () => {
         senderId,
         r,
         saved,
-        choice === 'resume',
+        choice !== 'fresh',
+        only,
       )
       if (res.cancelled || cancelled()) return none
       const l = layoutOf(res.board)
@@ -878,6 +879,14 @@ void app.whenReady().then(async () => {
           // dropped
         }
       }
+      // loops of the agents left behind stay saved; one watching a terminal follows it to its new id, or goes with a console that is gone
+      const closedIds = new Set(res.pending.agents.map((a) => a.id))
+      pendingLoops = savedLoops.flatMap((s) => {
+        if (!closedIds.has(s.agentId)) return []
+        if (s.trigger.kind !== 'output') return [s]
+        const terminalId = res.ids.get(s.trigger.terminalId) ?? (closedIds.has(s.trigger.terminalId) ? s.trigger.terminalId : null)
+        return terminalId ? [{ ...s, trigger: { ...s.trigger, terminalId } }] : []
+      })
       attach(senderId, r.root, l, res.pending)
       const edges = flow.list(senderId).map(edgeDto)
       const notice = [restoreNotice(res.skipped), droppedNote].filter(Boolean).join(' ') || null
@@ -889,6 +898,33 @@ void app.whenReady().then(async () => {
     }
   }
   let autoOpened = false
+  /** The renderer's pick of saved terminals to relaunch; nothing picked when the window goes away or reloads meanwhile. */
+  const choosers = new Map<number, (ids: string[]) => void>()
+  const chooseTerminals = (senderId: number, saved: SavedBoard): Promise<Set<string>> =>
+    new Promise((resolve) => {
+      const wc = webContents.fromId(senderId)
+      if (!wc || wc.isDestroyed()) return resolve(new Set())
+      const done = (ids: string[]) => {
+        choosers.delete(senderId)
+        wc.off('destroyed', none)
+        wc.off('did-start-loading', none)
+        resolve(new Set(ids))
+      }
+      const none = () => done([])
+      wc.once('destroyed', none)
+      wc.once('did-start-loading', none)
+      choosers.set(senderId, done)
+      const agentOf = new Map(saved.agents.map((a) => [a.id, a]))
+      const terminals = saved.nodes.flatMap((n): { id: string; name: string; role: string | null }[] => {
+        const a = agentOf.get(n.id)
+        if (n.kind === 'agent') return a && !savedAgentProblem(a) ? [{ id: n.id, name: a.name, role: a.role }] : []
+        return n.kind === 'console' ? [{ id: n.id, name: 'Console', role: null }] : []
+      })
+      const free = slots.free()
+      // the event carries at most 200: an agent beyond that simply stays saved
+      send(senderId, 'board:choose', { terminals: terminals.slice(0, 200), room: Number.isFinite(free) ? Math.max(0, free) : null })
+    })
+  handle('board:chosen', appOrigin, ({ ids }, { senderId }) => (choosers.get(senderId)?.(ids), { ok: true as const }))
   // once per app run: the last project comes back by itself if it still is a git repository (else the app starts empty, silently)
   handle('board:restore', appOrigin, (_in, { senderId }) =>
     safe('Could not restore the board', async () => {
@@ -983,10 +1019,10 @@ void app.whenReady().then(async () => {
   handle('memory:get', appOrigin, ({ scope }) => safe('Could not read the memory', () => needMemory().read(scope, repo?.root ?? null)))
   handle('memory:save', appOrigin, ({ scope, content }) => safe('Could not save the memory', () => needMemory().write(scope, repo?.root ?? null, content, 'you')))
   handle('workspace:closeTerminals', appOrigin, ({ ids }, { senderId }) =>
-    safe('Could not close the workspace', () => closeBatch(senderId, ids, 'Close this workspace?', 'Agents or programs are still running in it and will be stopped. Each agent worktree is then handled as when closing it alone.')),
+    safe('Could not close the workspace', () => closeBatch(senderId, ids, `Close ${ids.length} terminal${ids.length > 1 ? 's' : ''}?`, 'Agents or programs are still running in them and will be stopped. Each agent worktree is then handled as when closing it alone.')),
   )
   handle('workspace:pickRepo', appOrigin, (_in, { senderId }) =>
-    safe('Could not open the repository', async () => {
+    safe('Could not open the folder', async () => {
       if (!gitPath) throw new AgentError('git is not installed')
       notRestoring()
       if (repo) assertNotStarting({ starting }) // before the dialog: an agent still starting would end up without a card
@@ -995,7 +1031,7 @@ void app.whenReady().then(async () => {
       let dir = testRepo
       if (!dir) {
         const win = windowOf(senderId)
-        const opts = { title: 'Open repository', buttonLabel: 'Open', properties: ['openDirectory' as const] }
+        const opts = { title: 'Open folder', buttonLabel: 'Open', properties: ['openDirectory' as const, 'createDirectory' as const] }
         const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
         dir = r.canceled ? undefined : r.filePaths[0]
       }
@@ -1080,7 +1116,24 @@ void app.whenReady().then(async () => {
   handle('flow:update', appOrigin, ({ id, ...patch }, { senderId }) => safe('Could not update the edge', () => ({ edge: edgeDto(flow.update(senderId, id, patch)) })))
   handle('flow:remove', appOrigin, ({ id }, { senderId }) => safe('Could not remove the edge', () => (flow.remove(senderId, id), { ok: true as const })))
   // processes first, so the state the flow engine then reports already says they are stopped
-  handle('flow:pauseAll', appOrigin, (_in, { senderId }) => (ptys.stopOwned(senderId), flow.pauseAll(senderId), loops.restartIdle(senderId), { ok: true as const }))
+  const pauseAll = (ownerId: number) => (ptys.stopOwned(ownerId), flow.pauseAll(ownerId), loops.restartIdle(ownerId))
+  handle('flow:pauseAll', appOrigin, (_in, { senderId }) => (pauseAll(senderId), { ok: true as const }))
+  // Memory guard: with the system about to run out (which freezes the whole machine), everything is paused once, so nothing grows
+  // further and the user can close terminals. Armed again only after memory recovered: resuming while still low is the user's call.
+  let memoryTripped = false
+  setInterval(() => {
+    const avail = availBytes()
+    if (avail === null) return
+    if (avail > RESERVE_BYTES + AGENT_BYTES / 2) memoryTripped = false
+    if (avail >= RESERVE_BYTES || memoryTripped) return
+    const owners = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed()).map((w) => w.webContents.id).filter((o) => ptys.idsOf(o).length > 0 && !ptys.isStopped(o))
+    if (owners.length === 0) return
+    memoryTripped = true
+    for (const o of owners) {
+      pauseAll(o)
+      send(o, 'loop:notice', { text: `Memory is almost full (${(avail / 2 ** 30).toFixed(1)} GB free), everything was paused. Close some terminals, then Resume all` })
+    }
+  }, 2000).unref()
   handle('flow:resumeAll', appOrigin, (_in, { senderId }) => (ptys.contOwned(senderId), flow.resumeAll(senderId), loops.restartIdle(senderId), { ok: true as const }))
   // loops: the agent and a watched terminal must be of the calling window and of one workspace (checked in LoopEngine.set)
   handle('loop:list', appOrigin, (_in, { senderId }) => ({ loops: loops.list(senderId).map(loopDto) }))

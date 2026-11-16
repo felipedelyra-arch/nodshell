@@ -3,7 +3,7 @@ import { create } from 'zustand'
 import { MAX_LIVE, WORKSPACES_MAX } from '../shared/agent'
 import { useAnnotations } from './annotations/store'
 import type { ChannelOutput, EventPayload } from '../shared/ipc/channels'
-import { addSpawned, addSquad, boardNodes, cardNode as card, keepOnBoard, type BoardView, CARD_W, closableIds, endName, groupableIds, groupSize, inWorkspace, joinGroup, leaveGroup, nextSlot, raiseOnly, removeCard, setCollapsed, setPinned, TILE_W, webTileNode, type WebTileData, type AgentState, type AppNode, type FlowEdgeDto, type SourceEnd, type TargetEnd, type TerminalFlowNode } from './graph'
+import { addSpawned, addSquad, boardNodes, cardNode as card, keepOnBoard, type BoardView, CARD_W, closableIds, endName, isTerminal, groupableIds, groupSize, inWorkspace, joinGroup, leaveGroup, nextSlot, raiseOnly, removeCard, setCollapsed, setPinned, TILE_W, webTileNode, type WebTileData, type AgentState, type AppNode, type FlowEdgeDto, type SourceEnd, type TargetEnd, type TerminalFlowNode } from './graph'
 
 export type { AgentState, TerminalFlowNode }
 /** an edge animates this long after it fired; Connect lights the squad's edges this long */
@@ -83,6 +83,8 @@ type State = {
   addWorkspace: () => void
   selectWorkspace: (id: string) => void
   closeWorkspace: () => Promise<void>
+  /** closes the selected terminals of the board in view, or all of them when none is selected (one confirmation) */
+  closeTerminals: () => Promise<void>
   spawnMany: (presetId: string, count: number) => Promise<boolean>
   /** resolves to an error message, or null when the squad is on the board */
   createSquad: () => Promise<string | null>
@@ -170,7 +172,7 @@ export const useCanvas = create<State>((set, get) => {
   const show = (text: string, tone: Toast['tone']) => {
     clearTimeout(toastTimer)
     set({ toast: { text, tone } })
-    toastTimer = setTimeout(() => set({ toast: null }), tone === 'error' ? 4000 : 6000)
+    toastTimer = setTimeout(() => set({ toast: null }), tone === 'error' ? 8000 : 6000)
   }
 
   const first = freshWorkspace(1)
@@ -259,7 +261,7 @@ export const useCanvas = create<State>((set, get) => {
         const note = notice ?? leftBehind({ kept, archived })
         if (note) show(note, 'info')
       } catch (e) {
-        show(remoteMessage(e, 'Could not open the repository.'), 'error')
+        show(remoteMessage(e, 'Could not open the folder.'), 'error')
       } finally {
         busyBoard = false
         set({ restoring: false })
@@ -329,6 +331,35 @@ export const useCanvas = create<State>((set, get) => {
         })
       } catch (e) {
         show(remoteMessage(e, 'Could not close the workspace.'), 'error')
+      } finally {
+        busyBoard = false
+      }
+    },
+
+    closeTerminals: async () => {
+      if (busyBoard) return
+      busyBoard = true
+      try {
+        const s = get()
+        const cards = inWorkspace(s.nodes, s.activeWorkspace).filter(isTerminal)
+        const picked = cards.filter((n) => n.selected)
+        const going = picked.length > 0 ? picked : cards
+        const ids = closableIds(going)
+        if (ids.length > 0) {
+          const { closed, kept, archived } = await window.api.invoke('workspace:closeTerminals', { ids })
+          if (!closed) return // the user chose to keep them running
+          const note = leftBehind({ kept, archived })
+          if (note) show(note, 'info')
+        }
+        const gone = new Set(going.map((n) => n.id))
+        set((c) => {
+          const max = c.maximized !== null && gone.has(c.maximized)
+          let nodes = max ? raiseOnly(c.nodes, null) : c.nodes
+          for (const id of gone) nodes = removeCard(nodes, id)
+          return { nodes, maximized: max ? null : c.maximized, tasks: tasksOn(c.tasks, nodes) }
+        })
+      } catch (e) {
+        show(remoteMessage(e, 'Could not close the terminals.'), 'error')
       } finally {
         busyBoard = false
       }

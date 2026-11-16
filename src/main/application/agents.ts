@@ -247,6 +247,23 @@ export class AgentService {
     return scraped ? { text: scraped, source: 'scrape' } : { text: null, source: 'none' }
   }
 
+  /**
+   * The reply of the turn that just ended, for whoever acts on a Stop (edges, loops, handoff). Claude Code fires Stop a moment
+   * before the reply reaches the transcript (about 100 ms, measured with 2.1.325), so it is awaited for up to ~3 s; an older
+   * reply is never returned in its place. Null when the turn left no text. Never a scrape of the screen.
+   */
+  async turnReply(ownerId: number, id: string): Promise<string | null> {
+    const a = this.owned(ownerId, id)
+    if (!a.transcriptPath) return null
+    for (const wait of [0, 50, 100, 200, 400, 800, 1500]) {
+      if (wait) await new Promise((r) => setTimeout(r, wait))
+      if (this.agents.get(id) !== a) return null // closed meanwhile
+      const text = await this.p.adapter.readLastMessage({ sessionId: a.sessionId, transcriptPath: a.transcriptPath }, true).catch(() => null)
+      if (text) return text
+    }
+    return null
+  }
+
   /** CloseAgent: ask `confirmStop` first when the process is still alive, then stop it, drop its hooks, then apply the worktree removal policy (dirty work only goes on explicit Discard). */
   async close(ownerId: number, id: string, confirm?: ConfirmDiscard, confirmStop?: (a: { name: string; role: string }) => Promise<boolean>, keepWorktree = false): Promise<RemovalOutcome | 'cancelled' | 'stopped'> {
     const a = this.owned(ownerId, id)

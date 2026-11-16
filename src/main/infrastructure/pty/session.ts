@@ -52,3 +52,13 @@ export function sessionRss(sids: number[]): number {
   }
   return pages * PAGE
 }
+
+/** Memory the system can still hand out without swapping (MemAvailable), or null where /proc/meminfo does not say. */
+export function availableBytes(): number | null {
+  try {
+    const kb = /^MemAvailable:\s+(\d+) kB$/m.exec(readFileSync('/proc/meminfo', 'utf8'))?.[1]
+    return kb ? Number(kb) * 1024 : null
+  } catch {
+    return null
+  }
+}

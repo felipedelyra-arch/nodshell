@@ -13,7 +13,7 @@ export const SUMMARY_TIMEOUT_MS = 5 * 60_000
 
 export type HandoffSource = { name: string; role: string; branch: string }
 
-export const handoffHeader = (from: HandoffSource): string => cleanLine(`Handoff from ${from.name} (${from.role}, branch ${from.branch})`)
+export const handoffHeader = (from: HandoffSource): string => cleanLine(`Handoff from ${from.name} (${from.role}${from.branch ? `, branch ${from.branch}` : ''})`)
 
 /** The agent's reply as the dialog shows it: cleaned like any message (no control or format characters), trimmed, cut to BRIEFING_MAX. */
 export const briefingOf = (message: string): string => cleanText(message).trim().slice(0, BRIEFING_MAX)

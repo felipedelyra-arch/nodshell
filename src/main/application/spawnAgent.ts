@@ -7,7 +7,7 @@ import { connectSquad } from './createSquad'
 import type { FlowEngine } from './flow'
 import type { GroupRegistry } from './groups'
 import type { SpawnInput } from './mcpTools'
-import { checkCapacity, presetRequest, type Slots } from './spawnMany'
+import { presetRequest, type Slots } from './spawnMany'
 import type { SquadRegistry } from './squads'
 import type { TaskBoard } from './tasks'
 
@@ -105,7 +105,7 @@ export class SquadSpawner {
     if (!preset) throw new AgentError(`No preset named ${input.preset}`)
     if (preset.role === 'orchestrator') throw new AgentError('An Orchestrator cannot spawn another Orchestrator')
     if (s.extraIds.length >= SQUAD_EXTRAS_MAX) throw new AgentError(`Your squad already has ${SQUAD_EXTRAS_MAX} extra agents`)
-    checkCapacity(this.d.slots.free(), 1, this.d.slots.limit)
+    this.d.slots.check(1)
     return { preset, squadId: s.id }
   }
 

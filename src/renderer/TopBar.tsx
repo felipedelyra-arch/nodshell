@@ -71,11 +71,11 @@ function ProjectMenu() {
         data-testid="workspace"
         aria-haspopup={repo ? 'menu' : undefined}
         aria-expanded={repo ? open : undefined}
-        aria-label={repo ? `Project ${repo.name}, menu` : 'Open repository'}
+        aria-label={repo ? `Project ${repo.name}, menu` : 'Open folder'}
         onClick={() => (repo ? setOpen((v) => !v) : void openRepo())}
       >
         {folder}
-        <span data-testid="workspace-name">{repo ? repo.name : 'Open repository'}</span>
+        <span data-testid="workspace-name">{repo ? repo.name : 'Open folder'}</span>
         <span aria-hidden="true">▾</span>
       </button>
       {open && repo && (

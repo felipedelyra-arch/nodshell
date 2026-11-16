@@ -36,6 +36,13 @@ export const OrchestratorNode = memo(function OrchestratorNode({ id, data, selec
   const updateInternals = useUpdateNodeInternals()
   // the panel's height follows its rows and the edge handles sit on its sides: re-measure them when it changes
   useEffect(() => updateInternals(id), [id, agents, sections.length, updateInternals])
+  // its terminal is hidden: a question asked there (trust this folder, a permission) would otherwise wait unseen
+  const asking = !maximized && lead?.data.agent && lead.data.status !== 'exited' ? lead.data.agent.state : undefined
+  useEffect(() => {
+    if (asking !== 'waiting' && asking !== 'starting') return
+    const t = setTimeout(() => useCanvas.getState().notify('The Orchestrator is waiting for you: open its terminal (the expand button on its panel) and answer there.', 'info'), asking === 'waiting' ? 0 : 8000)
+    return () => clearTimeout(t)
+  }, [asking])
   if (!lead?.data.agent) return null
   const state = paused && isAlive(lead.data) ? 'paused' : lead.data.status === 'exited' ? 'exited' : lead.data.agent.state
   // the state is only told by the header dot (as in the reference) and by the expand button's name: "needs you" or "starting" mean answer it in the terminal

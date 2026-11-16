@@ -11,13 +11,13 @@ test('chrome: top bar, pills, command bar, footer, dialogs', async () => {
   try {
     // top left, in order; later-phase chips are disabled with a tip
     const items = page.getByRole('navigation', { name: 'Workspace' }).locator('button')
-    await expect(items).toHaveText(['← Back to home', 'Open repository▾', 'Workspace 1', '+', '✕ Close'])
+    await expect(items).toHaveText(['← Back to home', 'Open folder▾', 'Workspace 1', '+', '✕ Close'])
     for (const name of ['Back to home', 'New workspace']) await expect(page.getByRole('button', { name: new RegExp(name) })).toHaveAttribute('aria-disabled', 'true') // home is a later phase; "+" needs a repository
     await expect(page.getByRole('button', { name: 'Close workspace' })).not.toHaveAttribute('aria-disabled', 'true')
     await expect(page.getByRole('tab', { name: 'Workspace 1' })).toHaveAttribute('aria-selected', 'true')
 
     // pills: seven, in order; Pause and Resume disabled while nothing runs (the tip shows on focus); Memory works (F8)
-    await expect(page.locator('button.pill')).toHaveText(['New console', 'Spawn 4', 'Group', 'Presets', 'Pause all', 'Resume all', 'Memory'])
+    await expect(page.locator('button.pill')).toHaveText(['New console', 'Spawn 4', 'Group', 'Presets', 'Pause all', 'Resume all', 'Memory', 'Close all'])
     await expect(page.getByRole('button', { name: 'Memory', exact: true })).not.toHaveAttribute('aria-disabled', 'true')
     for (const name of ['Pause all', 'Resume all']) {
       const pill = page.getByRole('button', { name, exact: true }) // the tip is the description, not part of the name

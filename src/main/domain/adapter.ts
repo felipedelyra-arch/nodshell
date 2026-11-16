@@ -40,5 +40,6 @@ export interface AgentAdapter {
   /** The state after `signal`, given the current one (see domain/state.ts). */
   detectState(current: AgentState, signal: AgentSignal): AgentState
   /** Last assistant message of a session, or null when unknown. */
-  readLastMessage(session: SessionRef): Promise<string | null>
+  /** `thisTurnOnly`: only a reply newer than the last prompt (null while the turn's reply is not recorded yet). */
+  readLastMessage(session: SessionRef, thisTurnOnly?: boolean): Promise<string | null>
 }

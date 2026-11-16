@@ -194,8 +194,10 @@ test('dictation: hold Space on the board writes into the field and never sends; 
     // only the user's Enter sends it
     await bar.fill('review the code')
     await bar.press('Enter')
-    await expect.poll(() => r.runs().flatMap((x) => submissions(r.logs, x.pid))).toEqual([]) // no Orchestrator: refused with the @name hint
-    await expect(page.getByRole('alert')).toContainText('@name')
+    // no Orchestrator and a single agent: it is the obvious recipient, no @ needed
+    // (the Space typed into its terminal earlier in this test is still in its input line, before the paste)
+    await expect.poll(() => r.runs().flatMap((x) => submissions(r.logs, x.pid))).toEqual([` ${START}review the code${END}`])
+    await expect(bar).toHaveValue('')
     expect(errors).toEqual([])
     expect(await page.evaluate(() => (window as unknown as { __csp: string[] }).__csp)).toEqual([])
   } finally {

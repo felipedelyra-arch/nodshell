@@ -114,6 +114,8 @@ export const channels = {
   // at startup: main reopens the last project (if still a git repository) and, after one question, its saved board
   'board:restore': { in: z.undefined(), out: z.object({ repo: z.object({ name: label, branch: label }).nullable(), ...restored }) },
   // the renderer's part of the board (main knows the rest); ids main does not know for this window are ignored
+  // answer to the `board:choose` event: the saved terminals to relaunch (none = leave them all closed)
+  'board:chosen': { in: z.object({ ids: z.array(id).max(MAX_BOARD_IDS) }), out: z.object({ ok: z.literal(true) }) },
   'board:saveLayout': {
     in: z.object({
       workspaces: z.array(workspaceOut).min(1).max(WORKSPACES_MAX),
@@ -252,6 +254,8 @@ export const events = {
   'memory:changed': z.object({ scope, updatedAt: z.number().int(), updatedBy: z.string().regex(MEMORY_EDITOR_RE) }),
   // main is about to save the board for good (quit, close): the renderer sends its layout now
   'board:flush': z.object({}),
+  // the user asked to pick which saved terminals come back; `room`: how many agents fit in memory now (null: unknown)
+  'board:choose': z.object({ terminals: z.array(z.object({ id, name: z.string().max(50), role: z.string().max(40).nullable() })).max(MAX_BOARD_IDS), room: z.number().int().min(0).nullable() }),
   // every loop of the window after any change
   'loop:changed': z.object({ loops: z.array(loopOut).max(MAX_BOARD_IDS) }),
   // a loop ended or paused by itself (goal reached, max runs, watched terminal closed); shown to the user

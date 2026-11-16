@@ -28,14 +28,14 @@ Download the latest package from the [Releases](https://github.com/felipedelyra-
 **Debian / Ubuntu**
 
 ```sh
-sudo apt install ./nodshell-0.1.2-amd64.deb
+sudo apt install ./nodshell-0.1.3-amd64.deb
 ```
 
 **AppImage**
 
 ```sh
-chmod +x nodshell-0.1.2-x86_64.AppImage
-./nodshell-0.1.2-x86_64.AppImage
+chmod +x nodshell-0.1.3-x86_64.AppImage
+./nodshell-0.1.3-x86_64.AppImage
 ```
 
 The AppImage needs FUSE 2 (`libfuse2`, or `libfuse2t64` on recent Ubuntu releases).

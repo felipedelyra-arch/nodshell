@@ -40,7 +40,8 @@ export type RemovalOutcome = 'removed' | 'archived' | 'kept'
 export const needsCloseConfirm = (state: AgentState): boolean => state !== 'exited' && state !== 'error'
 
 /** The workspace repository: real path of a git top level, held only in main. */
-export type Repo = { root: string; name: string; branch: string }
+/** `plain`: no git (or no commit yet), so agents share the folder instead of getting a worktree each; `branch` is then only a label. */
+export type Repo = { root: string; name: string; branch: string; plain?: true }
 
 /** Asked only when a worktree is dirty; anything but 'discard' keeps everything. */
 export type ConfirmDiscard = (wt: Worktree, commits: number) => Promise<'keep' | 'discard'>

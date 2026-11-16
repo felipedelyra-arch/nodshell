@@ -82,7 +82,7 @@ export function DetailsPopover({ ptyId, name, agent, startedAt, running, workspa
         <dd>{agent.model}</dd>
         <dt>Branch</dt>
         <dd className="truncate" title={agent.branch}>
-          {agent.branch}
+          {agent.branch || 'project folder'}
         </dd>
         <dt>Elapsed</dt>
         <dd>{elapsed}</dd>

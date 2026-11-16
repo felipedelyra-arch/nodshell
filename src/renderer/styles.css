@@ -44,6 +44,7 @@ body { font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; overflow: 
 .pill-h4 { --a: #ff4d4f; --b: #ffc13d; --c: #3ddc84; }
 .pill-h5 { --a: #ff4d6d; --b: #ff9ac1; --c: #d4e157; }
 .pill-h6 { --a: #ffd23d; --b: #fff09a; --c: #ff8fb1; }
+.pill-h7 { --a: #ff5a5a; --b: #ff9a7a; --c: #ffffff; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; } }
 
 .pill[aria-disabled='true'] { background: linear-gradient(#0f0f12, #0f0f12) padding-box, linear-gradient(120deg, color-mix(in srgb, var(--a) 50%, transparent), color-mix(in srgb, var(--b) 50%, transparent) 52%, color-mix(in srgb, var(--c) 50%, transparent)) border-box; color: var(--color-muted); box-shadow: none; cursor: not-allowed; }
@@ -232,7 +233,7 @@ button.footer-chip:hover { border-color: rgb(255 106 43 / 0.7); }
 .info-btn { display: inline-grid; place-items: center; width: 26px; height: 26px; padding: 0; border-radius: 9999px; border: 1px solid rgb(255 255 255 / 0.14); background: rgb(24 24 28 / 0.9); color: var(--color-text); font-family: ui-serif, Georgia, serif; font-weight: 700; font-style: italic; font-size: 13px; cursor: pointer; transition: border-color 0.15s; }
 .info-btn:hover { border-color: rgb(255 106 43 / 0.7); }
 .chrome-modal { width: min(440px, 92vw); font-family: ui-sans-serif, system-ui, sans-serif; }
-.cmd-bar { position: relative; display: flex; align-items: center; gap: 8px; box-sizing: border-box; width: min(720px, calc(100vw - 360px)); min-width: 420px; height: 48px; padding: 0 10px; border-radius: 16px; border: 1px solid rgb(255 255 255 / 0.12); background: rgb(58 58 64 / 0.72); backdrop-filter: blur(8px); font-family: ui-sans-serif, system-ui, sans-serif; }
+.cmd-bar { position: relative; display: flex; align-items: center; gap: 8px; box-sizing: border-box; width: min(800px, calc(100vw - 360px)); min-width: 420px; height: 48px; padding: 0 10px; border-radius: 16px; border: 1px solid rgb(255 255 255 / 0.12); background: rgb(58 58 64 / 0.72); backdrop-filter: blur(8px); font-family: ui-sans-serif, system-ui, sans-serif; }
 .cmd-logo { flex-shrink: 0; }
 .cmd-field { position: relative; flex: 1; min-width: 0; }
 .cmd-field input { width: 100%; box-sizing: border-box; padding: 6px 4px; border: 0; background: transparent; color: var(--color-text); font-family: inherit; font-size: 14px; }

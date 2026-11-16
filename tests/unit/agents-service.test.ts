@@ -145,6 +145,20 @@ describe('AgentService with Claude hooks', () => {
     expect(states).toEqual(['idle', 'working', 'waiting', 'working', 'idle', 'exited'])
   })
 
+  it('turnReply waits for the reply the CLI records a moment after its Stop; never a scrape', async () => {
+    const adapter = claude()
+    const read = vi.spyOn(adapter, 'readLastMessage').mockResolvedValue(null)
+    const { svc, hookEvents } = setup(false, adapter)
+    const a = await svc.spawn(1, repo, { role: 'qa', cols: 80, rows: 24 })
+    expect(await svc.turnReply(1, a.id)).toBeNull() // no transcript known yet: nothing to wait for
+    expect(read).not.toHaveBeenCalled()
+    hookEvents[0]!(hook('SessionStart', { transcriptPath: '/p/s.jsonl' }))
+    read.mockResolvedValueOnce(null).mockResolvedValueOnce(null).mockResolvedValue('late reply')
+    expect(await svc.turnReply(1, a.id)).toBe('late reply')
+    expect(read).toHaveBeenCalledTimes(3)
+    expect(read).toHaveBeenLastCalledWith({ sessionId: sid, transcriptPath: '/p/s.jsonl' }, true)
+  })
+
   it('keeps the transcript path of the current session only; falls back to the scrape, labelled as such', async () => {
     const adapter = claude()
     const read = vi.spyOn(adapter, 'readLastMessage').mockResolvedValue(null)

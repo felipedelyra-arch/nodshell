@@ -17,6 +17,7 @@ import { useCanvas } from './store'
 import { startBus } from './terminal/bus'
 import { TerminalNode } from './terminal/TerminalNode'
 import { BugDialog } from './chrome/InfoDialogs'
+import { RestoreDialog, type RestoreChoices } from './chrome/RestoreDialog'
 import { MemoryDialog } from './chrome/MemoryDialog'
 import { startLayoutSaver } from './board/layout'
 import { CommandBar } from './chrome/CommandBar'
@@ -115,6 +116,8 @@ function Workbench() {
   const board = useMemo(() => inWorkspace(allNodes, active), [allNodes, active])
   const nodes = useMemo(() => hideOtherWorkspaces(allNodes, active), [allNodes, active])
   const selectedCount = groupableIds(board).length
+  const terminalCount = board.filter(isTerminal).length
+  const pickedCount = board.filter((n) => isTerminal(n) && n.selected).length
   const edges = useMemo(() => flowEdges(board, flowEdgeList, { flowsPaused, firing, lit }), [board, flowEdgeList, flowsPaused, firing, lit])
   const anyAlive = allNodes.some((n) => isTerminal(n) && isAlive(n.data))
   /** Drag from a card's or group's side onto another card, group or Orchestrator node of this board. */
@@ -140,6 +143,8 @@ function Workbench() {
   const memoryBtn = useRef<HTMLButtonElement>(null)
   const [memoryOpen, setMemoryOpen] = useState(false)
   const bar = useRef<HTMLDivElement>(null)
+  const [choices, setChoices] = useState<RestoreChoices | null>(null)
+  useEffect(() => window.api.on('board:choose', setChoices), [])
 
   useEffect(() => {
     void window.api.invoke('settings:get', undefined).then((r) => useCanvas.getState().setLiveLimit(r.liveLimit), () => undefined)
@@ -298,6 +303,9 @@ function Workbench() {
           >
             Memory
           </Pill>
+          <Pill hue={7} tip={terminalCount === 0 ? 'No terminals on this board' : undefined} onClick={() => void useCanvas.getState().closeTerminals()}>
+            {pickedCount > 0 ? `Close ${pickedCount} selected` : 'Close all'}
+          </Pill>
         </div>
         <CommandBar />
       </div>
@@ -315,6 +323,15 @@ function Workbench() {
           onClose={() => {
             setMemoryOpen(false)
             memoryBtn.current?.focus()
+          }}
+        />
+      )}
+      {choices && (
+        <RestoreDialog
+          {...choices}
+          onDone={(ids) => {
+            setChoices(null)
+            void window.api.invoke('board:chosen', { ids }).catch(() => undefined)
           }}
         />
       )}

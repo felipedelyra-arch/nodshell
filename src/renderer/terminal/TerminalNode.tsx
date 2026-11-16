@@ -14,6 +14,7 @@ import { TailPreview } from './TailPreview'
 const CHUNK = 32768
 const ACK_EVERY = 50_000
 const FONT_PX = 11
+const MAX_FONT_PX = 14 // a maximized card is for reading: larger text, and the terminal gets the columns that fit
 const DOM_RENDERER = new URLSearchParams(location.search).get('renderer') === 'dom' // set by main in tests only
 // semantic zoom: below this the card shows a text preview instead of a terminal; it comes back above LOW_ZOOM + hysteresis so it does not flicker
 export const LOW_ZOOM = 0.5
@@ -65,8 +66,8 @@ export const TerminalNode = memo(function TerminalNode({ id, data, selected, dra
   drawScaleRef.current = drawScale
   useEffect(() => {
     const term = termRef.current
-    if (term) term.options.fontSize = FONT_PX * drawScale // columns and rows stay: the box scales with the font
-  }, [drawScale])
+    if (term) term.options.fontSize = maximized ? MAX_FONT_PX : FONT_PX * drawScale // columns and rows stay: the box scales with the font
+  }, [drawScale, maximized])
   const restoreRef = useRef<(() => void) | null>(null)
   const activeBoard = useCanvas((st) => st.activeWorkspace === data.workspaceId)
   const paused = useCanvas((s) => s.paused) && isAlive(data) // Pause all holds the process: shown over its live state, which comes back on resume

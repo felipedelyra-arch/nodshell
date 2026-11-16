@@ -51,7 +51,12 @@ describe('routeCommand', () => {
   it('without any Orchestrator, refuses and hints at @name', () => {
     const r = routeCommand('do it', global, { ...st, squads: [] })
     expect(r.targets).toEqual([])
-    expect(r.refused[0]?.reason).toContain('@name')
+    expect(r.refused[0]?.reason).toContain('@name: @Orca, @Zoe')
+    // a lone agent needs no @; an empty board says what to do
+    const lone = routeCommand('do it', global, { agents: [ag('zoe', 'Zoe', 'frontend')], groups: [], squads: [] })
+    expect(ids(lone)).toEqual(['zoe'])
+    expect(lone.text).toBe('do it')
+    expect(routeCommand('do it', global, { agents: [], groups: [], squads: [] }).refused[0]?.reason).toContain('Spawn')
   })
   it('the squad field without @ goes to that Orchestrator only', () => {
     expect(ids(routeCommand('go', { workspaceId: W, squadId: 's2' }, st))).toEqual(['o2'])

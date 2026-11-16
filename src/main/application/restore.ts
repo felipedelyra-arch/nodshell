@@ -1,8 +1,8 @@
 import { CONTROL_RE, GROUP_NAME_MAX } from '../../shared/preset'
 import { AgentError, type ConfirmDiscard, type RemovalOutcome, type Repo, type Worktree } from '../domain/agent'
-import type { SavedAgent, SavedBoard, SavedNode } from '../domain/board'
+import type { SavedBoard, SavedNode } from '../domain/board'
 import type { RestoreRequest, SpawnedAgent } from './agents'
-import { planRestore, rebuildBoard, savedAgentProblem, type Layout, type Skipped } from './board'
+import { planRestore, rebuildBoard, savedAgentProblem, type Layout, type Pending, type Skipped } from './board'
 import type { FlowEngine } from './flow'
 import type { GroupRegistry } from './groups'
 import type { Slots } from './spawnMany'
@@ -33,9 +33,11 @@ export type Restored = {
   /** saved terminal id -> new id, for each terminal that came back */
   ids: Map<string, string>
   skipped: Skipped[]
-  /** saved agents that did not come back but stay on the saved board, to be tried again (and cleaned up by Empty board) */
-  pending: { agents: SavedAgent[]; nodes: SavedNode[] }
+  /** saved agents that did not come back but stay on the saved board (with their groups, squads and edges), to be tried again (and cleaned up by Empty board) */
+  pending: Pending
 }
+
+const NO_PENDING = (): Pending => ({ agents: [], nodes: [], groups: [], squads: [], edges: [] })
 
 const SIZE = { cols: 80, rows: 24 }
 const validName = (n: string) => n.trim().length > 0 && n.length <= GROUP_NAME_MAX && !CONTROL_RE.test(n)
@@ -59,17 +61,17 @@ async function checkWorktrees(d: Pick<RestoreDeps, 'worktrees'>, repo: Repo, b: 
  * RestoreBoard: relaunches, one at a time and within the free terminals, each saved agent in its own revalidated worktree (resumed
  * when its CLI has the conversation, else fresh) and each console as a new shell, then puts back the groups, squads and edges that
  * still have both ends. Never throws for one terminal: what did not come back is listed in `skipped` and, for agents, kept in
- * `pending`. Cancelled (window gone, app leaving) before any spawn: what already started is stopped and nothing else is done.
+ * `pending`. With `only`, just the terminals the user picked are relaunched. Cancelled (window gone, app leaving) before any spawn: what already started is stopped and nothing else is done.
  */
-export async function restoreBoard(d: RestoreDeps, ownerId: number, repo: Repo, saved: SavedBoard, resume: boolean): Promise<Restored> {
+export async function restoreBoard(d: RestoreDeps, ownerId: number, repo: Repo, saved: SavedBoard, resume: boolean, only?: ReadonlySet<string>): Promise<Restored> {
   const { trees, problems } = await checkWorktrees(d, repo, saved)
-  const plan = planRestore(saved, problems, d.slots.free())
+  const plan = planRestore(saved, problems, d.slots.free(), only, d.slots.freeOfLimit())
   const ws = new Map(saved.nodes.map((n) => [n.id, n.workspaceId]))
   const ids = new Map<string, string>()
   const agents = new Map<string, SpawnedAgent>()
   const consoles = new Map<string, string>()
   const skipped = [...plan.skipped]
-  const slots = d.slots.reserve(plan.agents.length + plan.consoles.length)
+  const slots = d.slots.reserve(plan.agents.length + plan.consoles.length, true) // the plan was cut to what is free: not checked twice
   let cancelled = false
   try {
     for (const a of plan.agents) {
@@ -94,19 +96,31 @@ export async function restoreBoard(d: RestoreDeps, ownerId: number, repo: Repo, 
       } catch {
         skipped.push({ name: 'a console', reason: 'it could not start' })
       } finally {
-        slots.use()
+        slots.use(false)
       }
     }
   } finally {
     slots.release()
   }
   const kept = new Set(skipped.flatMap((x) => (x.keep && x.id ? [x.id] : [])))
-  const pending = { agents: saved.agents.filter((a) => kept.has(a.id)), nodes: saved.nodes.filter((n) => kept.has(n.id)) }
   if (cancelled || d.cancelled()) {
     await d.stop(ownerId, [...ids.values()]).catch(() => undefined)
-    return { cancelled: true, board: { ...saved, nodes: [], agents: [], groups: [], squads: [], edges: [] }, agents: new Map(), consoles: new Map(), ids: new Map(), skipped: [], pending: { agents: [], nodes: [] } }
+    return { cancelled: true, board: { ...saved, nodes: [], agents: [], groups: [], squads: [], edges: [] }, agents: new Map(), consoles: new Map(), ids: new Map(), skipped: [], pending: NO_PENDING() }
   }
   const board = rebuildBoard(saved, ids)
+  // what the agents left behind still hold: their groups, the squads, and the edges that lost an end with them (restored ends under their new ids)
+  const now = (id: string) => ids.get(id) ?? id
+  const rebuilt = new Set(board.edges.map((e) => e.id))
+  const end = <E extends { kind: string; id: string }>(e: E): E => (e.kind === 'agent' ? { ...e, id: now(e.id) } : { ...e })
+  const pGroups = saved.groups.filter((g) => saved.nodes.some((n) => n.parentId === g.id && kept.has(n.id)))
+  const held = new Set([...kept, ...pGroups.map((g) => g.id), ...saved.squads.map((q) => q.id)])
+  const pending: Pending = {
+    agents: saved.agents.filter((a) => kept.has(a.id)),
+    nodes: saved.nodes.filter((n) => held.has(n.id)),
+    groups: pGroups,
+    squads: saved.squads.map((q) => ({ ...q, orchestratorId: now(q.orchestratorId), extraIds: q.extraIds.map(now) })),
+    edges: kept.size === 0 ? [] : saved.edges.filter((e) => !rebuilt.has(e.id)).map((e) => ({ ...e, source: end(e.source), target: end(e.target) })),
+  }
   const nodeOf = new Map(board.nodes.map((n) => [n.id, n]))
   const membersOf = (parent: string) => board.nodes.filter((n) => n.parentId === parent && (n.kind === 'agent' || n.kind === 'console')).sort((x, y) => x.order - y.order).map((n) => n.id)
   board.groups = board.groups.filter((g) => {

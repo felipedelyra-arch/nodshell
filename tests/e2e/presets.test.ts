@@ -22,13 +22,13 @@ test('top bar, workspace and branch label', async () => {
     const home = page.getByRole('button', { name: /Back to home/ })
     await expect(home).toHaveAttribute('aria-disabled', 'true')
     await expect(home).toHaveAttribute('data-tip', 'Home arrives in a later phase')
-    await expect(page.getByRole('button', { name: 'Open repository' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Open folder' })).toBeVisible()
     await expect(page.getByRole('tab', { name: 'Workspace 1' })).toHaveAttribute('aria-selected', 'true')
     await expect(page.getByTestId('repo-badge')).toHaveCount(0) // no repository, no branch
-    await expect(page.locator('button.pill')).toHaveText(['New console', 'Spawn 4', 'Group', 'Presets', 'Pause all', 'Resume all', 'Memory'])
+    await expect(page.locator('button.pill')).toHaveText(['New console', 'Spawn 4', 'Group', 'Presets', 'Pause all', 'Resume all', 'Memory', 'Close all'])
     await expect(page.getByTestId('live-badge')).toHaveText(/^0 live/)
 
-    await page.getByRole('button', { name: 'Open repository' }).click()
+    await page.getByRole('button', { name: 'Open folder' }).click()
     await expect(page.getByTestId('workspace-name')).toHaveText('demo repo')
     await expect(page.getByTestId('workspace')).toHaveAccessibleName('Project demo repo, menu')
     await expect(page.getByTestId('repo-badge')).toHaveText('main')

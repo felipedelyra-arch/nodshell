@@ -1,7 +1,7 @@
 import { useEffect, useRef, type KeyboardEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 
-const FOCUSABLE = 'button:not([disabled]), textarea, [tabindex]:not([tabindex="-1"])'
+const FOCUSABLE = 'button:not([disabled]), textarea, input, [tabindex]:not([tabindex="-1"])'
 
 /** Small modal: Esc and the backdrop close it (`backdropCloses={false}`: only Esc and its buttons), Tab stays inside; the opener restores focus in `onClose`. */
 export function AppDialog({ label, onClose, children, className = '', backdropCloses = true }: { label: string; onClose: () => void; children: ReactNode; className?: string; backdropCloses?: boolean }) {

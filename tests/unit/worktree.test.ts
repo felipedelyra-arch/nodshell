@@ -32,20 +32,32 @@ describe('WorktreeService.openRepo', () => {
   it('accepts the top level and reports name and branch', () => {
     expect(repo).toEqual({ root: repoDir, name: 'my repo', branch: 'main' })
   })
-  it('rejects a non-repo directory, a subdirectory and a missing path', async () => {
-    const plain = join(tmp, 'plain')
-    mkdirSync(plain)
+  it('rejects a subdirectory of a repository and a missing path', async () => {
     mkdirSync(join(repoDir, 'sub'))
-    await expect(svc.openRepo(plain)).rejects.toThrow('Not a git repository')
     await expect(svc.openRepo(join(repoDir, 'sub'))).rejects.toThrow('Not the top folder')
     await expect(svc.openRepo(join(tmp, 'nope'))).rejects.toThrow('Not a folder')
   })
-  it('rejects a repository with no commits when adding', async () => {
+  it('opens a folder without git, or without a first commit, as plain: agents work in the folder itself and nothing is ever removed', async () => {
+    const plain = join(tmp, 'plain')
+    mkdirSync(plain)
+    writeFileSync(join(plain, 'keep.txt'), 'k\n')
     const empty = join(tmp, 'empty')
     mkdirSync(empty)
     git(empty, 'init', '-q')
-    const r = await svc.openRepo(empty)
-    await expect(svc.add(r, 'qa')).rejects.toThrow('The repository has no commits yet')
+    for (const [dir, label] of [[plain, 'no git'], [empty, 'no commits']] as const) {
+      const r = await svc.openRepo(dir)
+      expect(r).toEqual({ root: dir, name: dir === plain ? 'plain' : 'empty', branch: label, plain: true })
+      const wt = await svc.add(r, 'qa')
+      expect(wt).toEqual({ repoRoot: dir, path: dir, branch: '', base: '' })
+      expect(await svc.adopt(r, { path: dir, branch: '', role: 'qa', base: '' })).toEqual(wt)
+      await expect(svc.adopt(r, { path: tmp, branch: '', role: 'qa', base: '' })).rejects.toThrow('not valid')
+      expect(await svc.remove(wt, async () => 'discard')).toBe('removed')
+      expect(existsSync(dir)).toBe(true)
+    }
+    expect(existsSync(join(plain, 'keep.txt'))).toBe(true)
+    expect(existsSync(join(plain, '.git'))).toBe(false)
+    // a real repository refuses an agent saved while the folder was plain
+    await expect(svc.adopt(repo, { path: repoDir, branch: '', role: 'qa', base: '' })).rejects.toThrow('not valid')
   })
 })
 

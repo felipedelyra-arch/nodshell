@@ -75,6 +75,17 @@ describe('planRestore', () => {
     ])
     expect(planRestore(b, new Map(), 0).agents).toEqual([])
   })
+  it('with a pick, relaunches only the picked terminals: other agents stay saved, other consoles are dropped', () => {
+    const p = planRestore(board(), new Map(), 20, new Set([F2]))
+    expect(p.agents.map((a) => a.name)).toEqual(['Leo'])
+    expect(p.consoles).toEqual([])
+    expect(p.skipped.every((s) => s.keep && s.unchosen && s.reason === 'left closed')).toBe(true)
+    expect(p.skipped.map((s) => s.name).sort()).toEqual(['Max', 'Zoe'])
+    expect(planRestore(board(), new Map(), 20, new Set([CON])).consoles.map((c) => c.id)).toEqual([CON])
+    // no memory for agents: a console still comes back, it only counts against the limit
+    const low = planRestore(board(), new Map(), 0, undefined, 20)
+    expect([low.agents.length, low.consoles.map((c) => c.id)]).toEqual([0, [CON]])
+  })
 })
 
 describe('rebuildBoard', () => {
@@ -153,6 +164,8 @@ describe('restoreNotice', () => {
   it('one line, or nothing', () => {
     expect(restoreNotice([])).toBeNull()
     expect(restoreNotice([{ name: 'Zoe', reason: 'its worktree is missing' }])).toBe('1 terminal did not come back: Zoe (its worktree is missing).')
+    expect(restoreNotice([{ name: 'Zoe', reason: 'left closed', unchosen: true }])).toBe('1 agent left closed, offered again the next time this project opens.')
+    expect(restoreNotice([{ name: 'Zoe', reason: 'left closed', unchosen: true }, { name: 'Leo', reason: 'its worktree is missing' }])).toBe('1 terminal did not come back: Leo (its worktree is missing). 1 agent left closed, offered again the next time this project opens.')
     expect(restoreNotice(Array.from({ length: 50 }, () => ({ name: 'Zoe', reason: 'its worktree is missing' })))!.length).toBeLessThanOrEqual(400)
   })
 })
@@ -237,7 +250,7 @@ describe('restoreBoard', () => {
     ])
     // both stay on the saved board, to be tried again at the next start
     expect(r.pending.agents.map((a) => a.name)).toEqual(['Zoe', 'Leo'])
-    expect(r.pending.nodes.map((x) => x.id).sort()).toEqual([F1, F2].sort())
+    expect(r.pending.nodes.map((x) => x.id).sort()).toEqual([F1, F2, GF, SQ].sort()) // with their group and the squad
     expect(r.board.groups).toEqual([]) // nobody of the group is back
     expect(r.board.squads).toEqual([{ id: SQ, orchestratorId: [...r.agents.keys()][0], groupIds: [], extraIds: [] }])
     expect(flow.list(1)).toEqual([])
@@ -282,10 +295,34 @@ describe('restoreBoard', () => {
     expect(r.skipped.map((x) => [x.name, x.branch, x.reason])).toEqual([['Zoe', 'agent/frontend-1', 'no terminal was free'], ['Leo', 'agent/frontend-2', 'no terminal was free, again'], ['a console', undefined, 'no terminal was free']])
     expect(r.pending.agents.map((a) => a.name)).toEqual(['Zoe', 'Leo'])
     expect(restoreNotice(r.skipped)).toContain('Zoe (agent/frontend-1, no terminal was free)')
-    // saved again with the live board: pending, with their nodes, and never as a card of a group that is gone
+    // saved again with the live board: pending, with their nodes, still in their group and with the edge between them
     const s = buildSnapshot({ agents: [], consoles: [], groups: [], squads: [], edges: [], layout: layoutOf(r.board), pending: r.pending }, () => id(999))
     expect(s.agents.map((a) => [a.name, a.pending])).toEqual([['Zoe', true], ['Leo', true]])
-    expect(s.nodes.filter((x) => x.kind === 'agent').map((x) => x.parentId)).toEqual([null, null])
+    expect(s.nodes.filter((x) => x.kind === 'agent').map((x) => x.parentId)).toEqual([GF, GF])
+    expect(s.groups.map((g) => g.id)).toEqual([GF])
+    expect(s.edges.map((e) => e.id)).toEqual([id(41)]) // the squad is not on this snapshot, so the edge to it is not either
+  })
+
+  it('agents left closed keep their group, squad and edges: saved around the live board, and whole again at the next start', async () => {
+    const { d } = deps()
+    const r = await restoreBoard(d, 1, repo, board(), true, new Set([F1])) // only Zoe: the Orchestrator and Leo stay closed
+    const zoe = [...r.agents.keys()][0]!
+    expect(r.board.squads).toEqual([])
+    const s = buildSnapshot({ agents: [{ id: zoe, workspaceId: W1, role: 'frontend', name: 'Zoe', worktree: wt('frontend', 1), sessionId: id(101) }], consoles: [], groups: [{ id: GF, name: 'Frontend', memberIds: [zoe] }], squads: [], edges: [], layout: layoutOf(r.board), pending: r.pending }, () => id(999))
+    expect(s.agents.map((a) => [a.name, a.pending]).sort()).toEqual([['Leo', true], ['Max', true], ['Zoe', false]])
+    expect(s.squads).toEqual([{ id: SQ, orchestratorId: ORCH, groupIds: [GF], extraIds: [F2] }])
+    expect(s.nodes.find((n) => n.id === ORCH)!.parentId).toBe(SQ)
+    expect(s.nodes.find((n) => n.id === F2)!.parentId).toBe(GF)
+    expect(s.nodes.filter((n) => n.id === SQ || n.id === GF).map((n) => n.kind).sort()).toEqual(['group', 'orchestrator'])
+    expect(s.edges.map((e) => [e.id, e.source.id, e.target.id])).toEqual([[id(40), GF, SQ], [id(41), zoe, F2]])
+    // nothing was dropped on the way back in, and a full restore of it has everyone, the squad and both edges
+    expect(sanitizeBoard(s).dropped).toBe(0)
+    const again = deps()
+    const full = await restoreBoard(again.d, 1, repo, s, true)
+    expect(full.agents.size).toBe(3)
+    expect(again.squads.get(1, SQ)).toMatchObject({ groupIds: [GF] })
+    expect(again.groups.get(1, GF)!.memberIds).toHaveLength(2)
+    expect(again.flow.list(1)).toHaveLength(2)
   })
 
   it('Empty board applies the removal policy to every worktree that checks out, with the confirmation; one that does not is never touched, only listed', async () => {

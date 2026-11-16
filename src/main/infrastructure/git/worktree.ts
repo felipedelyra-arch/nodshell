@@ -13,6 +13,9 @@ function gitEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return out
 }
 
+/** The "worktree" of an agent in a plain folder: the folder itself, no branch. Never removed. */
+const PLAIN = (root: string): Worktree => ({ repoRoot: root, path: root, branch: '', base: '' })
+
 /** One git worktree per agent, outside the repo: <baseDir>/<hash of repo real path>/<role>-<n>, branch agent/<role>-<n>. */
 export class WorktreeService {
   private chain: Promise<unknown> = Promise.resolve()
@@ -33,7 +36,10 @@ export class WorktreeService {
     })
   }
 
-  /** Accepts only the top level of a non-bare git repository that is not one of our own worktrees. */
+  /**
+   * Any folder the user picked, except a subfolder of a repository and our own worktrees. A git repository with a commit gets one
+   * worktree per agent; a folder without git (or without a first commit to branch from) is "plain": agents work in the folder itself.
+   */
   async openRepo(dir: string): Promise<Repo> {
     let real: string
     try {
@@ -42,10 +48,12 @@ export class WorktreeService {
     } catch {
       throw new AgentError('Not a folder')
     }
+    if (existsSync(this.baseDir) && (real + sep).startsWith(realpathSync(this.baseDir) + sep)) throw new AgentError('This folder cannot be opened')
     const top = await this.git(real, ['rev-parse', '--show-toplevel']).then((s) => s.trim(), () => '')
-    if (!top) throw new AgentError('Not a git repository')
+    if (!top) return { root: real, name: basename(real), branch: 'no git', plain: true }
     if (realpathSync(top) !== real) throw new AgentError('Not the top folder of a git repository')
-    if (existsSync(this.baseDir) && (real + sep).startsWith(realpathSync(this.baseDir) + sep)) throw new AgentError('Not a git repository')
+    const head = (await this.git(real, ['rev-parse', '--verify', '--quiet', 'HEAD^{commit}']).catch(() => '')).trim()
+    if (!head) return { root: real, name: basename(real), branch: 'no commits', plain: true }
     const branch = (await this.git(real, ['symbolic-ref', '--quiet', '--short', 'HEAD']).catch(() => '')).trim()
     return { root: real, name: basename(real), branch: branch || 'detached HEAD' }
   }
@@ -57,7 +65,7 @@ export class WorktreeService {
   /** Serialized so two concurrent spawns never pick the same n. */
   add(repo: Repo, role: string): Promise<Worktree> {
     if (!isValidRole(role)) return Promise.reject(new AgentError('Invalid role')) // before git is ever called
-    const next = this.chain.then(() => this.doAdd(repo.root, role))
+    const next = this.chain.then(() => (repo.plain ? PLAIN(repo.root) : this.doAdd(repo.root, role)))
     this.chain = next.catch(() => undefined)
     return next
   }
@@ -83,6 +91,10 @@ export class WorktreeService {
    * agent's branch `agent/<role>-<n>` checked out. Throws an AgentError saying why not.
    */
   async adopt(repo: Repo, saved: { path: string; branch: string; role: string; base: string }): Promise<Worktree> {
+    if (repo.plain || (!saved.branch && !saved.base)) {
+      if (repo.plain && !saved.branch && !saved.base && saved.path === repo.root) return PLAIN(repo.root)
+      throw new AgentError('its worktree is not valid') // the folder gained or lost git since it was saved
+    }
     const n = slotOf(saved.branch, saved.role)
     if (n === undefined || !saved.branch.startsWith('agent/') || !/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(saved.base)) throw new AgentError('its worktree is not valid')
     const dir = this.repoDir(repo.root)
@@ -117,6 +129,7 @@ export class WorktreeService {
    */
   async remove(wt: Worktree, confirm?: ConfirmDiscard): Promise<RemovalOutcome> {
     const { repoRoot: root, path, branch, base } = wt
+    if (!branch) return 'removed' // plain folder: the agent worked in the project folder itself, which is never ours to remove
     try {
       const present = existsSync(path)
       if (!present) await this.git(root, ['worktree', 'prune'])

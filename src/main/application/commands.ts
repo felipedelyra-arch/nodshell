@@ -11,12 +11,11 @@ export type Refusal = { name: string; reason: string }
 export type Route = { targets: Target[]; text: string; refused: Refusal[] }
 
 const NAMES_SHOWN = 8
-const NO_ORCHESTRATOR = 'No Orchestrator in this workspace; start the message with @name to reach an agent or group'
 
 /**
  * Who a typed or dictated command goes to. Pure: the renderer sends only text and scope, the state is the main's own.
  * `@name` (no case, longest name that fits, then a space or the end) is an agent's short name or a group's name inside the scope and is
- * stripped from the text; without it the command goes to the Orchestrator(s) of the scope. Problems come back as `refused`, never thrown.
+ * stripped from the text; without it the command goes to the Orchestrator(s) of the scope or, with no Orchestrator, to the workspace's only agent. Problems come back as `refused`, never thrown.
  */
 export function routeCommand(input: string, scope: CommandScope, st: CommandState): Route {
   const text = input.trim()
@@ -28,7 +27,12 @@ export function routeCommand(input: string, scope: CommandScope, st: CommandStat
   const orchestrators = (squad ? [squad] : st.squads).flatMap((s) => squadOf(s) ?? [])
 
   if (!text.startsWith('@')) {
-    return orchestrators.length === 0 ? { targets: [], text, refused: [{ name: 'Orchestrator', reason: NO_ORCHESTRATOR }] } : { targets: orchestrators.map(({ id, name }) => ({ id, name })), text, refused: [] }
+    if (orchestrators.length > 0) return { targets: orchestrators.map(({ id, name }) => ({ id, name })), text, refused: [] }
+    // no Orchestrator: a lone agent is the obvious recipient; with several, guessing would send work to the wrong one
+    if (inWs.length === 1) return { targets: inWs.map(({ id, name }) => ({ id, name })), text, refused: [] }
+    const shown = inWs.slice(0, NAMES_SHOWN).map((a) => `@${a.name}`).join(', ')
+    const reason = inWs.length === 0 ? 'Create an agent with Spawn first (consoles do not take commands)' : `Start the message with @name: ${shown}${inWs.length > NAMES_SHOWN ? ', ...' : ''}`
+    return { targets: [], text, refused: [{ name: inWs.length === 0 ? 'Nobody to send to.' : 'Who is this for?', reason }] }
   }
 
   // candidates: in a squad, only its agents (its Orchestrator included) and groups; else the whole workspace

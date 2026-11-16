@@ -36,6 +36,13 @@ describe('readLastAssistantText', () => {
     const p = file([user('hi'), asst('m1', text('first answer')), user('again'), asst('m2', [{ type: 'thinking', thinking: 'hmm' }]), asst('m2', text('part one')), asst('m2', text('part two'))])
     expect(readLastAssistantText(p)).toBe('part one\n\npart two')
   })
+  it('thisTurnOnly: an older reply is never taken for the reply of a turn that is not written yet', () => {
+    const stale = [user('hi'), asst('m1', text('old answer')), user('again')]
+    expect(readLastAssistantText(file(stale))).toBe('old answer')
+    expect(readLastAssistantText(file(stale), true)).toBeNull()
+    expect(readLastAssistantText(file([...stale, asst('m2', tool()), toolResult()]), true)).toBeNull()
+    expect(readLastAssistantText(file([...stale, asst('m2', tool()), toolResult(), asst('m3', text('new answer'))]), true)).toBe('new answer')
+  })
   it('string content is accepted', () => {
     expect(readLastAssistantText(file([user('x'), asst('m1', 'plain string reply')]))).toBe('plain string reply')
   })

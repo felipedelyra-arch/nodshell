@@ -22,8 +22,15 @@ export type SnapshotInput = {
   edges: Edge[]
   layout: Layout | null
   /** saved agents that did not come back at the last start: kept on the saved board (with their nodes) to be tried again */
-  pending?: { agents: SavedAgent[]; nodes: SavedNode[] }
+  pending?: Pending
 }
+
+/**
+ * What stays saved of the agents that did not come back (left closed by the user, or could not start): the agents, the groups and
+ * squads they are in, the edges that lost an end with them, and the nodes of all of those. Ids of agents that did come back are
+ * already the new ones.
+ */
+export type Pending = { agents: SavedAgent[]; nodes: SavedNode[]; groups: SavedGroup[]; squads: SavedSquad[]; edges: SavedEdge[] }
 
 /** Keeps only the layout of ids this window owns (anything else is ignored), with workspaces it names. */
 export function acceptLayout(l: Layout, known: (id: string) => boolean): Layout {
@@ -70,18 +77,45 @@ export function buildSnapshot(s: SnapshotInput, newId: () => string): SavedBoard
     .map((q) => ({ id: q.id, orchestratorId: q.orchestratorId, groupIds: q.groupIds.filter((g) => groupIds.has(g)), extraIds: q.extraIds.filter((a) => agentIds.has(a)) }))
   for (const q of squads) nodes.push({ id: q.id, kind: 'orchestrator', workspaceId: cardWs.get(q.orchestratorId)!, ...place(q.id), pinned: false, parentId: null, order: 0 })
   // agents that did not come back stay saved, as they were, so the next start tries them again and Empty board can clean them up
-  const groupNode = new Set(nodes.filter((n) => n.kind === 'group').map((n) => n.id))
-  for (const a of s.pending?.agents ?? []) {
-    const n = s.pending?.nodes.find((x) => x.id === a.id)
-    if (agentIds.has(a.id) || !n) continue
-    agents.push({ ...a, pending: true })
-    nodes.push({ ...n, workspaceId: wsIds.has(n.workspaceId) ? n.workspaceId : workspaces[0]!.id, parentId: n.parentId && groupNode.has(n.parentId) ? n.parentId : null })
+  // ...and so do their groups, squads and edges, so they come back where they were, not as loose cards
+  const p = s.pending
+  const pNode = (id: string) => p?.nodes.find((x) => x.id === id)
+  const inWs = (n: SavedNode): SavedNode => ({ ...n, workspaceId: wsIds.has(n.workspaceId) ? n.workspaceId : workspaces[0]!.id })
+  const closed = (p?.agents ?? []).filter((a) => !agentIds.has(a.id) && pNode(a.id))
+  const closedIds = new Set(closed.map((a) => a.id))
+  for (const g of p?.groups ?? []) {
+    const n = pNode(g.id)
+    if (groupIds.has(g.id) || !n || !p!.nodes.some((m) => m.parentId === g.id && closedIds.has(m.id))) continue
+    groups.push({ ...g })
+    groupIds.add(g.id)
+    nodes.push({ ...inWs(n), parentId: null })
+  }
+  for (const q of p?.squads ?? []) {
+    const more = { groupIds: q.groupIds.filter((g) => groupIds.has(g)), extraIds: q.extraIds.filter((a) => agentIds.has(a) || closedIds.has(a)) }
+    const live = squads.find((x) => x.id === q.id)
+    const n = pNode(q.id)
+    if (live) {
+      // its Orchestrator is back: the groups and extras still closed stay with it
+      live.groupIds = [...new Set([...live.groupIds, ...more.groupIds])]
+      live.extraIds = [...new Set([...live.extraIds, ...more.extraIds])]
+    } else if (closedIds.has(q.orchestratorId) && n) {
+      squads.push({ id: q.id, orchestratorId: q.orchestratorId, ...more })
+      nodes.push({ ...inWs(n), parentId: null })
+    }
   }
   const squadIds = new Set(squads.map((q) => q.id))
-  const exists = (e: { kind: string; id: string }) => (e.kind === 'agent' ? agentIds.has(e.id) : e.kind === 'group' ? groupIds.has(e.id) : squadIds.has(e.id))
+  for (const a of closed) {
+    const n = pNode(a.id)!
+    agents.push({ ...a, pending: true })
+    nodes.push({ ...inWs(n), parentId: n.parentId && (groupIds.has(n.parentId) || squadIds.has(n.parentId)) ? n.parentId : null })
+  }
+  const exists = (e: { kind: string; id: string }) => (e.kind === 'agent' ? agentIds.has(e.id) || closedIds.has(e.id) : e.kind === 'group' ? groupIds.has(e.id) : squadIds.has(e.id))
   const edges: SavedEdge[] = s.edges
     .filter((e) => wsIds.has(e.workspaceId) && exists(e.source) && exists(e.target))
     .map((e) => ({ id: e.id, workspaceId: e.workspaceId, source: { ...e.source }, target: { ...e.target }, template: e.template, condition: e.condition, paused: e.paused }))
+  for (const e of p?.edges ?? []) {
+    if (!edges.some((x) => x.id === e.id) && wsIds.has(e.workspaceId) && exists(e.source) && exists(e.target)) edges.push({ ...e, source: { ...e.source }, target: { ...e.target } })
+  }
   return { workspaces, nodes, agents, groups, squads, edges }
 }
 
@@ -90,20 +124,23 @@ export function savedAgentProblem(a: SavedAgent): string | null {
   if (!AGENT_NAME_RE.test(a.name) || !isValidRole(a.role)) return 'its saved data is not valid'
   if (!UUID_RE.test(a.sessionId)) return 'its saved session is not valid'
   if (a.model !== null && !(MODEL_CHOICES as readonly string[]).includes(a.model)) return 'its saved model is not valid'
-  if (!a.branch.startsWith('agent/') || slotOf(a.branch, a.role) === undefined || !SHA_RE.test(a.base)) return 'its saved branch is not valid'
+  const plain = a.branch === '' && a.base === '' // worked in a folder without git: no branch
+  if (!plain && (!a.branch.startsWith('agent/') || slotOf(a.branch, a.role) === undefined || !SHA_RE.test(a.base))) return 'its saved branch is not valid'
   if (a.systemPrompt.length > PROMPT_MAX || a.systemPrompt.includes('\0') || !UUID_RE.test(a.id) || (a.presetId !== null && !UUID_RE.test(a.presetId))) return 'its saved data is not valid'
   return null
 }
 
 /** `keep`: its record stays on the saved board (a later start tries again); `branch`: so the user can find its worktree. */
-export type Skipped = { name: string; reason: string; branch?: string; id?: string; keep?: boolean }
+export type Skipped = { name: string; reason: string; branch?: string; id?: string; keep?: boolean; /** the user left it closed: not a failure */ unchosen?: boolean }
 export type RestorePlan = { agents: SavedAgent[]; consoles: SavedNode[]; skipped: Skipped[] }
 
 /**
  * What to relaunch: each agent on the board whose saved data is valid and whose worktree checked out on disk (`problems`: why not,
- * by agent id; absent = fine), then the consoles, within `free` terminals. Everything else is skipped with its reason.
+ * by agent id; absent = fine), then the consoles, within `free` terminals. Everything else is skipped with its reason. With `only`
+ * (the terminals the user picked), an agent left out stays saved for a later start and a console left out is dropped. `free` is
+ * what agents may take (limit and memory); consoles only count against the limit (`freeOfLimit`).
  */
-export function planRestore(b: SavedBoard, problems: Map<string, string>, free: number): RestorePlan {
+export function planRestore(b: SavedBoard, problems: Map<string, string>, free: number, only?: ReadonlySet<string>, freeOfLimit = free): RestorePlan {
   const onBoard = new Set(b.nodes.filter((n) => n.kind === 'agent').map((n) => n.id))
   const plan: RestorePlan = { agents: [], consoles: [], skipped: [] }
   let left = Math.max(0, free)
@@ -113,12 +150,14 @@ export function planRestore(b: SavedBoard, problems: Map<string, string>, free: 
     const name = AGENT_NAME_RE.test(a.name) ? a.name : 'an agent'
     const again = a.pending ? ', again' : ''
     if (bad) plan.skipped.push({ name, reason: bad }) // malformed: dropped
+    else if (only && !only.has(a.id)) plan.skipped.push({ name, branch: a.branch, id: a.id, keep: true, unchosen: true, reason: 'left closed' })
     else if (problems.has(a.id)) plan.skipped.push({ name, branch: a.branch, id: a.id, keep: true, reason: problems.get(a.id)! + again })
     else if (left-- > 0) plan.agents.push(a)
     else plan.skipped.push({ name, branch: a.branch, id: a.id, keep: true, reason: `no terminal was free${again}` })
   }
-  for (const n of b.nodes.filter((x) => x.kind === 'console')) {
-    if (left-- > 0) plan.consoles.push(n)
+  let room = Math.max(0, freeOfLimit) - plan.agents.length
+  for (const n of b.nodes.filter((x) => x.kind === 'console' && (!only || only.has(x.id)))) {
+    if (room-- > 0) plan.consoles.push(n)
     else plan.skipped.push({ name: 'a console', reason: 'no terminal was free' })
   }
   return plan
@@ -152,10 +191,13 @@ export function rebuildBoard(b: SavedBoard, ids: Map<string, string>): SavedBoar
 }
 
 /** One line for the user: how many did not come back and why. Names are short agent names; nothing else is quoted. */
-export function restoreNotice(skipped: Skipped[], max = 400): string | null {
-  if (skipped.length === 0) return null
+export function restoreNotice(all: Skipped[], max = 400): string | null {
+  const skipped = all.filter((s) => !s.unchosen)
+  const closed = all.length - skipped.length
+  const later = closed > 0 ? `${closed} agent${closed > 1 ? 's' : ''} left closed, offered again the next time this project opens.` : ''
+  if (skipped.length === 0) return later || null
   const head = `${skipped.length} terminal${skipped.length > 1 ? 's' : ''} did not come back`
-  const text = `${head}: ${skipped.map((s) => `${s.name} (${s.branch ? `${s.branch}, ` : ''}${s.reason})`).join(', ')}.`
+  const text = `${head}: ${skipped.map((s) => `${s.name} (${s.branch ? `${s.branch}, ` : ''}${s.reason})`).join(', ')}.${later && ` ${later}`}`
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`
 }
 

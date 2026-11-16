@@ -20,4 +20,4 @@ export const emptyBoard = (): SavedBoard => ({ workspaces: [], nodes: [], agents
 /** A board worth asking about: at least one terminal (console or agent). */
 export const hasTerminals = (b: SavedBoard | null): b is SavedBoard => !!b && b.nodes.some((n) => n.kind === 'console' || n.kind === 'agent')
 
-export type RestoreChoice = 'resume' | 'fresh' | 'empty'
+export type RestoreChoice = 'resume' | 'choose' | 'fresh' | 'empty'

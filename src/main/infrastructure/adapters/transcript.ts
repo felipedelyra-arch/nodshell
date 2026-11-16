@@ -95,8 +95,11 @@ function* linesFromEnd(fd: number, size: number): Generator<string> {
   if (!skipping && carry.length && pos === 0) yield carry.toString('utf8')
 }
 
-/** Text of the last main-thread assistant message (all its text blocks), skipping sidechains and tool-only entries; capped. */
-export function readLastAssistantText(realPath: string): string | null {
+/**
+ * Text of the last main-thread assistant message (all its text blocks), skipping sidechains and tool-only entries; capped.
+ * `thisTurnOnly`: null when a user entry (a prompt or a tool result) is newer than any reply, i.e. the turn's reply is not written yet.
+ */
+export function readLastAssistantText(realPath: string, thisTurnOnly = false): string | null {
   let fd: number
   try {
     fd = openSync(realPath, constants.O_RDONLY | constants.O_NOFOLLOW)
@@ -111,6 +114,7 @@ export function readLastAssistantText(realPath: string): string | null {
       const p = parseLine(line)
       if (!found) {
         if (p.kind === 'assistant' && p.text) found = { id: p.id, parts: [p.text] }
+        else if (thisTurnOnly && p.kind === 'user') return null
         continue
       }
       // earlier text blocks of the same API message belong to the same reply

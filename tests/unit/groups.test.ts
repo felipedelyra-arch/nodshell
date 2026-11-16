@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { GroupRegistry } from '../../src/main/application/groups'
-import { checkCapacity, Slots, spawnMany } from '../../src/main/application/spawnMany'
+import { AGENT_BYTES, checkCapacity, RESERVE_BYTES, Slots, spawnMany } from '../../src/main/application/spawnMany'
 import type { SpawnedAgent } from '../../src/main/application/agents'
 import { MAX_LIVE } from '../../src/shared/agent'
 import type { Repo } from '../../src/main/domain/agent'
@@ -64,6 +64,32 @@ function deps(failAt: number[] = [], free = MAX_LIVE, exitAt: number[] = []) {
   const slots = new Slots(() => MAX_LIVE - free + live.size, MAX_LIVE)
   return { d: { presets: { get: (x: string) => (x === 'p1' ? preset : undefined) }, agents: { spawn }, groups, slots }, spawn, groups, slots }
 }
+
+describe('Slots: what fits in memory', () => {
+  it('counts free memory, the slots a batch holds and the terminals that just started', () => {
+    let avail: number | null = RESERVE_BYTES + 3.5 * AGENT_BYTES
+    let now = 0
+    const s = new Slots(() => 0, MAX_LIVE, () => avail, () => now)
+    expect(s.free()).toBe(3)
+    expect(s.freeOfLimit()).toBe(MAX_LIVE)
+    expect(() => s.reserve(4)).toThrow('Not enough free memory to start 4 more, there is room for 3. Close some terminals first')
+    const r = s.reserve(2)
+    expect(s.free()).toBe(1)
+    r.use()
+    r.use()
+    expect(s.free()).toBe(1) // started, but the system does not show their memory yet
+    now = 31_000
+    expect(s.free()).toBe(3)
+    avail = RESERVE_BYTES / 2
+    expect(s.free()).toBeLessThan(1)
+    expect(() => s.reserve(0)).not.toThrow() // nothing to start is never a refusal
+    s.reserve(1, true).use(false) // a console, already granted: neither checked nor counted as memory
+    avail = RESERVE_BYTES + 3.5 * AGENT_BYTES
+    expect(s.free()).toBe(3)
+    avail = null // the system does not say: only the limit counts
+    expect(s.free()).toBe(MAX_LIVE)
+  })
+})
 
 describe('checkCapacity / spawnMany', () => {
   it('refuses before creating anything when there are not enough slots', async () => {

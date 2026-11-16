@@ -87,11 +87,11 @@ export class ClaudeAdapter implements AgentAdapter {
   }
 
   /** Reads the session transcript (path from the hooks, validated again here) from its end. */
-  async readLastMessage(s: SessionRef): Promise<string | null> {
+  async readLastMessage(s: SessionRef, thisTurnOnly = false): Promise<string | null> {
     if (!s.transcriptPath) return null
     const home = this.env['HOME']
     const projects = claudeProjectsDir(this.env, home && isAbsolute(home) ? home : homedir())
     const real = validateTranscriptPath(s.transcriptPath, s.sessionId, projects)
-    return real ? readLastAssistantText(real) : null
+    return real ? readLastAssistantText(real, thisTurnOnly) : null
   }
 }

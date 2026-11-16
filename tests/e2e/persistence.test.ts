@@ -17,7 +17,7 @@ const resumedOf = (run: Run) => run.argv.find((a) => a.startsWith('--resume='))?
 /** The same user-data dir and HOME on every launch of a test: what one run saves, the next one finds. */
 function persistent(r: ReturnType<typeof setupRepo>) {
   const home = tempDir('nodshell-e2e-home-')
-  return (restore: 'resume' | 'fresh' | 'empty') => ({ ...r.env, HOME: home, NODSHELL_USER_DATA: join(home, 'userdata'), NODSHELL_TEST_RESTORE: restore })
+  return (restore: 'resume' | 'choose' | 'fresh' | 'empty') => ({ ...r.env, HOME: home, NODSHELL_USER_DATA: join(home, 'userdata'), NODSHELL_TEST_RESTORE: restore })
 }
 
 async function createSquad(page: Page): Promise<void> {
@@ -385,7 +385,7 @@ test('a console opened before the project stays (card and process) when the proj
 
     ;({ app, page, errors } = await launch(env('resume')))
     closed = false
-    await expect(page.getByRole('button', { name: 'Open repository' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Open folder' })).toBeVisible()
     await page.getByRole('button', { name: 'New console' }).click()
     await expect(page.getByTestId('terminal-node')).toHaveCount(1)
     await openRepo(page) // the first project, with its saved board
@@ -409,6 +409,131 @@ test('a console opened before the project stays (card and process) when the proj
     await expect(page.getByTestId('agent-node')).toHaveCount(1)
     await expect(page.getByTestId('terminal-node')).toHaveCount(1)
     await clean(page, errors)
+  } finally {
+    if (!closed) await app.close()
+  }
+})
+
+test('Choose terminals reopens only the picked agents and keeps the rest saved; Close all closes the board at once; low memory refuses new agents', async () => {
+  test.setTimeout(180_000)
+  const r = setupRepo()
+  const env = persistent(r)
+  let { app, page } = await launch(env('choose'))
+  let errors: string[]
+  let closed = false
+  try {
+    await openRepo(page)
+    await spawnPreset(page, 'Backend', 3)
+    await expect(page.getByTestId('agent-node')).toHaveCount(3)
+    await expect.poll(() => r.runs().length, { timeout: 60_000 }).toBe(3)
+    const names = await page.getByTestId('agent-node').evaluateAll((els) => els.map((e) => e.getAttribute('data-name')!))
+    await page.waitForTimeout(800)
+    await quit(app, r.runs().map((x) => x.pid))
+    closed = true
+
+    ;({ app, page } = await launch(env('choose')))
+    closed = false
+    const chooser = () => page.getByRole('dialog', { name: 'Choose terminals to open' })
+    let dlg = chooser()
+    await expect(dlg.getByRole('checkbox')).toHaveCount(3)
+    await expect(dlg.getByRole('button', { name: 'Open 0 selected' })).toBeDisabled()
+    await dlg.getByRole('checkbox', { name: new RegExp(`^${names[1]}`) }).check()
+    await dlg.getByRole('button', { name: 'Open 1 selected' }).click()
+    await expect(page.getByTestId('agent-node')).toHaveCount(1)
+    await expect(card(page, names[1]!)).toBeVisible()
+    await expect(page.getByText('2 agents left closed')).toBeVisible()
+    await expect.poll(() => r.runs().length, { timeout: 60_000 }).toBe(4)
+    await page.waitForTimeout(800)
+    await quit(app, [r.runs()[3]!.pid])
+    closed = true
+
+    // the two left closed are still offered; this time all three come back and one pill closes them all
+    ;({ app, page, errors } = await launch(env('choose')))
+    closed = false
+    dlg = chooser()
+    await expect(dlg.getByRole('checkbox')).toHaveCount(3)
+    await dlg.getByRole('button', { name: 'All', exact: true }).click()
+    await dlg.getByRole('button', { name: 'Open 3 selected' }).click()
+    await expect(page.getByTestId('agent-node')).toHaveCount(3)
+    await expect.poll(() => r.runs().length, { timeout: 60_000 }).toBe(7)
+    const pids = r.runs().slice(4).map((x) => x.pid)
+    await page.getByRole('button', { name: 'Close all', exact: true }).click()
+    await expect(page.getByTestId('agent-node')).toHaveCount(0)
+    await expectGone(...pids)
+    await clean(page, errors)
+    await app.close()
+    closed = true
+
+    // 2 GiB available: 1 GiB is kept for the system and no agent of 1.2 GiB fits in the rest
+    ;({ app, page, errors } = await launch({ ...env('empty'), NODSHELL_TEST_AVAIL_MB: '2048' }))
+    closed = false
+    await spawnPreset(page, 'Backend', 1)
+    await expect(page.getByRole('alert')).toContainText('Not enough free memory to start 1 more')
+    await expect(page.getByTestId('agent-node')).toHaveCount(0)
+  } finally {
+    if (!closed) await app.close()
+  }
+})
+
+test('memory almost full: everything is paused once and a notice says why', async () => {
+  const { app, page } = await launch({ NODSHELL_TEST_AVAIL_MB: '512' })
+  try {
+    await page.getByRole('button', { name: 'New console' }).click()
+    await expect(page.getByTestId('terminal-node')).toHaveCount(1)
+    await expect(page.getByText('Memory is almost full (0.5 GB free), everything was paused. Close some terminals, then Resume all.')).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByTestId('terminal-node')).toHaveAttribute('data-paused', 'true')
+    // resuming while memory is still low is the user's call: it is not paused again
+    await page.getByRole('button', { name: 'Resume all', exact: true }).click()
+    await expect(page.getByTestId('terminal-node')).not.toHaveAttribute('data-paused', 'true')
+    await page.waitForTimeout(3000)
+    await expect(page.getByTestId('terminal-node')).not.toHaveAttribute('data-paused', 'true')
+  } finally {
+    await app.close()
+  }
+})
+
+test('agents left closed keep their squad, groups and edges: a squad reopened in part comes back whole the next time', async () => {
+  test.setTimeout(300_000)
+  const r = setupRepo()
+  const env = persistent(r)
+  let { app, page } = await launch(env('choose'))
+  let closed = false
+  const chooser = () => page.getByRole('dialog', { name: 'Choose terminals to open' })
+  try {
+    await openRepo(page)
+    await createSquad(page)
+    await expect(page.getByTestId('agent-node')).toHaveCount(9)
+    await expect.poll(() => r.runs().length, { timeout: 60_000 }).toBe(9)
+    await expect(edges(page)).toHaveCount(4)
+    const front = await page.locator('[data-testid=agent-node]').evaluateAll((els) => els.filter((e) => e.querySelector('[data-testid=role-tag]')?.textContent === 'frontend').map((e) => e.getAttribute('data-name')!))
+    await page.waitForTimeout(800)
+    await quit(app, r.runs().map((x) => x.pid))
+    closed = true
+
+    // only the two Frontend agents: their group comes back, the Orchestrator and the other six stay closed
+    ;({ app, page } = await launch(env('choose')))
+    closed = false
+    await expect(chooser().getByRole('checkbox')).toHaveCount(9)
+    for (const name of front) await chooser().getByRole('checkbox', { name: new RegExp(`^${name}`) }).check()
+    await chooser().getByRole('button', { name: 'Open 2 selected' }).click()
+    await expect(page.getByTestId('agent-node')).toHaveCount(2)
+    await expect(page.getByText('7 agents left closed')).toBeVisible()
+    await expect(edges(page)).toHaveCount(0)
+    await expect.poll(() => r.runs().length, { timeout: 60_000 }).toBe(11)
+    await page.waitForTimeout(800)
+    await quit(app, r.runs().slice(9).map((x) => x.pid))
+    closed = true
+
+    // everyone this time: one squad again, its four groups and its four edges
+    ;({ app, page } = await launch(env('choose')))
+    closed = false
+    await expect(chooser().getByRole('checkbox')).toHaveCount(9)
+    await chooser().getByRole('button', { name: 'All', exact: true }).click()
+    await chooser().getByRole('button', { name: 'Open 9 selected' }).click()
+    await expect(page.getByTestId('agent-node')).toHaveCount(9)
+    await expect(page.locator('.react-flow__node-orchestrator')).toHaveCount(1)
+    await expect(page.locator('.react-flow__node-group')).toHaveCount(4)
+    await expect(edges(page)).toHaveCount(4)
   } finally {
     if (!closed) await app.close()
   }
