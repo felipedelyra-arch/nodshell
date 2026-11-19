@@ -1,7 +1,8 @@
-import { useEffect, useId, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { PROMPT_MAX } from '../../shared/agent'
 import { GOAL_MAX, GOAL_REACHED, IDLE_MAX_SEC, IDLE_MIN_SEC, LOOP_RUNS_DEFAULT, LOOP_RUNS_MAX, OUTPUT_TEXT_MAX, SCHEDULE_MAX_SEC, SCHEDULE_MIN_SEC } from '../../shared/loop'
 import { inWorkspace, isTerminal } from '../graph'
+import { ConfirmRow } from '../chrome/ConfirmRow'
 import { remoteMessage, useCanvas, type LoopDto } from '../store'
 
 type Kind = LoopDto['trigger']['kind']
@@ -40,6 +41,13 @@ export function LoopSection({ agentId, name, workspaceId, running }: { agentId: 
   const setLoops = useCanvas((s) => s.setLoops)
   const [form, setForm] = useState(() => formOf(loop))
   const [busy, setBusy] = useState(false)
+  const [confirming, setConfirming] = useState(false)
+  const removeBtn = useRef<HTMLButtonElement>(null)
+  // the confirmation is gone: the focus goes back to Remove (after this render shows it again), never to the page
+  const keep = () => {
+    setConfirming(false)
+    requestAnimationFrame(() => removeBtn.current?.focus())
+  }
   const ids = { kind: useId(), secs: useId(), term: useId(), text: useId(), prompt: useId(), goal: useId(), runs: useId() }
   // other terminals of the same board, agent or console, by name (never this agent's own: main refuses it)
   const terminals = useMemo(() => inWorkspace(nodes, workspaceId).filter(isTerminal).filter((n) => n.id !== agentId && n.data.status === 'running').map((n) => ({ id: n.id, name: n.data.name })), [nodes, workspaceId, agentId])
@@ -124,7 +132,20 @@ export function LoopSection({ agentId, name, workspaceId, running }: { agentId: 
         <label htmlFor={ids.runs}>Max runs</label>
         <input id={ids.runs} className="field py-0.5" type="number" min={1} max={LOOP_RUNS_MAX} value={form.maxRuns} aria-invalid={!runsOk || undefined} onChange={(e) => set({ maxRuns: e.target.value })} />
       </div>
-      <div className="flex items-center gap-2">
+      {confirming && loop && (
+        <div
+          onKeyDown={(e) => {
+            if (e.key !== 'Escape') return
+            e.stopPropagation() // Esc cancels the confirmation only, not the whole details box
+            keep()
+          }}
+        >
+          <ConfirmRow label="Remove loop" confirm="Remove" busy={busy} onKeep={keep} onConfirm={() => void call(() => window.api.invoke('loop:remove', { id: loop.id }), 'Could not remove the loop.').then(() => setConfirming(false))}>
+            Remove this loop? Its prompt and trigger are lost.
+          </ConfirmRow>
+        </div>
+      )}
+      <div className={`flex items-center gap-2 ${confirming && loop ? 'hidden' : ''}`}>
         <button type="button" className="btn-accent" disabled={!canSave} aria-label={`${loop ? 'Save' : 'Start'} loop of ${name}`} onClick={save}>
           {loop ? 'Save' : 'Start'}
         </button>
@@ -133,12 +154,12 @@ export function LoopSection({ agentId, name, workspaceId, running }: { agentId: 
             <button type="button" className="btn-quiet" disabled={busy} onClick={() => void call(() => window.api.invoke('loop:update', { id: loop.id, paused: loop.state === 'active' }), 'Could not update the loop.')}>
               {loop.state === 'active' ? 'Pause' : 'Resume'}
             </button>
-            <button type="button" className="btn-quiet" disabled={busy} onClick={() => void call(() => window.api.invoke('loop:remove', { id: loop.id }), 'Could not remove the loop.')}>
+            <button ref={removeBtn} type="button" className="btn-danger" disabled={busy} onClick={() => setConfirming(true)}>
               Remove
             </button>
           </>
         )}
-        <p className="field-hint m-0 flex-1 text-right">{loop ? 'Save restarts it from zero' : 'Never in a starting agent or one that needs you'}</p>
+        <p className="field-hint m-0 flex-1 text-right">{loop ? 'Saving restarts the count' : 'Waits while the agent is starting or needs you'}</p>
       </div>
     </details>
   )

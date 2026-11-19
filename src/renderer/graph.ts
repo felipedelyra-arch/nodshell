@@ -1,7 +1,9 @@
 // Pure canvas graph logic (no React, no store): terminal and group nodes, group layout, membership.
 import { Position, type Edge, type Node } from '@xyflow/react'
 import { SQUAD_GROUP_SIZE, type SquadRole } from '../shared/agent'
+import type { PageWidth } from '../shared/webtile'
 import type { ChannelOutput, EventPayload } from '../shared/ipc/channels'
+import { edgeActivity, type EdgeActivity } from './flow/activity'
 
 export type AgentState = ChannelOutput<'agent:spawnMany'>['agents'][number]['state']
 /** `bypass`: the agent runs with permission bypass (the tag then reads BYPASS); no agent does yet. */
@@ -16,7 +18,7 @@ export type GroupFlowNode = Node<GroupData, 'group'>
 export type OrchestratorData = { orchestratorId: string; groups: { id: string; role: string }[]; workspaceId?: string }
 export type OrchestratorFlowNode = Node<OrchestratorData, 'orchestrator'>
 /** A live web page: what main reports of it (cleaned title, origin + path, loading, a generic error). */
-export type WebTileData = { title: string; address: string; loading: boolean; error: string | null; workspaceId?: string }
+export type WebTileData = { title: string; address: string; loading: boolean; error: string | null; canGoBack?: boolean; canGoForward?: boolean; workspaceId?: string; /** the viewport preset (null/absent = Fit) */ pageWidth?: PageWidth | null }
 export type WebTileFlowNode = Node<WebTileData, 'webtile'>
 export type AppNode = TerminalFlowNode | GroupFlowNode | OrchestratorFlowNode | WebTileFlowNode
 
@@ -35,10 +37,10 @@ export const isGroup = (n: AppNode): n is GroupFlowNode => n.type === 'group'
 export const isOrchestrator = (n: AppNode): n is OrchestratorFlowNode => n.type === 'orchestrator'
 export const isWebTile = (n: AppNode): n is WebTileFlowNode => n.type === 'webtile'
 
-/** a web tile: a title bar over a 16:10 page */
-export const TILE_HEAD = 30
-export const TILE_W = 480
-export const TILE_H = TILE_HEAD + 300
+/** a web tile: a title bar and a navigation row (back, forward, reload, address) over a page that is 1024x640 by default (the node adds its 1 px frame and the body's top line) */
+export const TILE_HEAD = 30 + 34 // title bar and navigation row (measured)
+export const TILE_W = 1024 + 2
+export const TILE_H = TILE_HEAD + 640 + 2
 export const TILE_MIN = { w: 240, h: TILE_HEAD + 120 }
 
 export function webTileNode(id: string, data: WebTileData, position: { x: number; y: number }, size?: { w: number; h: number }): WebTileFlowNode {
@@ -178,10 +180,10 @@ export function setPinned(nodes: AppNode[], id: string, pinned: boolean): AppNod
   })
 }
 
-/** Raises the maximized card above everything else (null puts all back). */
+/** Raises the maximized card or web tile above everything else (null puts all back). */
 export function raiseOnly(nodes: AppNode[], id: string | null): AppNode[] {
   return nodes.map((n): AppNode => {
-    if (!isTerminal(n)) return n
+    if (!isTerminal(n) && n.type !== 'webtile') return n
     if (n.id === id) return { ...n, zIndex: 1000 }
     if (n.zIndex === undefined) return n
     const rest = { ...n }
@@ -342,8 +344,8 @@ export const SQUAD_HANDLES: Record<SquadRole, { source: string; target: string; 
 export type FlowEdgeDto = ChannelOutput<'flow:create'>['edge']
 export type SourceEnd = FlowEdgeDto['source']
 export type TargetEnd = FlowEdgeDto['target']
-/** `label`: "<from> to <to>", the name of the edge's dot button; `paused`: by the edge itself or because every flow is paused; `lane`: 1 for the second of a two-way pair, drawn beside the first */
-export type FlowEdgeData = { edge: FlowEdgeDto; label: string; paused: boolean; firing: boolean; lit: boolean; lane: 0 | 1 }
+/** `label`: "<from> to <to>", the name of the edge's dot button; `paused`: by the edge itself or because every flow is paused; `lane`: 1 for the second of a two-way pair, drawn beside the first; `activity`: what its moving dots show */
+export type FlowEdgeData = { edge: FlowEdgeDto; label: string; paused: boolean; firing: boolean; lit: boolean; lane: 0 | 1; activity: EdgeActivity }
 export type FlowFlowEdge = Edge<FlowEdgeData, 'flow'>
 
 /** The Orchestrator's own card lives inside its node: on the board, it is that node. */
@@ -376,6 +378,13 @@ export function endName(n: AppNode): string {
   return n.data.name
 }
 
+/** The agent states at an end: a group's members, an agent, an Orchestrator's own agent. */
+function statesAt(nodes: AppNode[], n: AppNode): AgentState[] {
+  const id = isOrchestrator(n) ? n.data.orchestratorId : n.id
+  const cards = isGroup(n) ? membersOf(nodes, n.id) : nodes.filter((x): x is TerminalFlowNode => isTerminal(x) && x.id === id)
+  return cards.flatMap((c) => (c.data.agent ? [c.data.agent.state] : []))
+}
+
 const centreX = (nodes: AppNode[], n: AppNode) => {
   const parent = n.parentId ? nodes.find((x) => x.id === n.parentId) : undefined
   return (parent?.position.x ?? 0) + n.position.x + sizeOf(n).w / 2
@@ -386,11 +395,28 @@ const centreX = (nodes: AppNode[], n: AppNode) => {
  * any other edge leaves the side facing its target. An edge whose ends are not on this board is not drawn.
  * The paths are hidden from assistive tech; each edge's dot is a button (see FlowEdge).
  */
-export function flowEdges(nodes: AppNode[], edges: FlowEdgeDto[], s: { flowsPaused: boolean; firing: Record<string, number>; lit: Record<string, number> }): FlowFlowEdge[] {
+export function flowEdges(
+  nodes: AppNode[],
+  edges: FlowEdgeDto[],
+  s: { flowsPaused: boolean; paused: boolean; firing: Record<string, number>; lit: Record<string, number>; tasks: Record<string, EventPayload<'tasks:changed'>> },
+): FlowFlowEdge[] {
   return edges.flatMap((e, i): FlowFlowEdge[] => {
     const from = nodeOf(nodes, e.source)
     const to = nodeOf(nodes, e.target)
     if (!from || !to) return []
+    // the delegations of the Orchestrator at the target end that went to the source end: the group or one of its agents
+    const ends = new Set([from.id, ...(isGroup(from) ? membersOf(nodes, from.id).map((m) => m.id) : [])])
+    const latest = isOrchestrator(to) ? (s.tasks[to.id]?.latest ?? []).filter((t) => ends.has(t.id)) : []
+    const activity = edgeActivity(e, {
+      orchestrator: isOrchestrator(to),
+      source: statesAt(nodes, from),
+      target: statesAt(nodes, to),
+      firing: e.id in s.firing,
+      delegating: latest.some((t) => t.status === 'running'),
+      taskFailed: latest.some((t) => t.status === 'failed'),
+      flowsPaused: s.flowsPaused,
+      processesPaused: s.paused,
+    })
     const role = isOrchestrator(to) && isGroup(from) ? to.data.groups.find((g) => g.id === from.id)?.role : undefined
     const squadRole = role !== undefined && isSquadRole(role) ? role : undefined
     const rightward = centreX(nodes, to) >= centreX(nodes, from)
@@ -407,7 +433,7 @@ export function flowEdges(nodes: AppNode[], edges: FlowEdgeDto[], s: { flowsPaus
         focusable: false,
         deletable: false,
         domAttributes: { 'aria-hidden': true },
-        data: { edge: e, label: `${endName(from)} to ${endName(to)}`, paused: e.paused !== null || s.flowsPaused, firing: e.id in s.firing, lit: e.id in s.lit, lane: edges.slice(0, i).some((x) => x.source.id === e.target.id && x.target.id === e.source.id) ? 1 : 0 },
+        data: { edge: e, label: `${endName(from)} to ${endName(to)}`, paused: e.paused !== null || s.flowsPaused, firing: e.id in s.firing, lit: e.id in s.lit, lane: edges.slice(0, i).some((x) => x.source.id === e.target.id && x.target.id === e.source.id) ? 1 : 0, activity },
       },
     ]
   })

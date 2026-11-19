@@ -33,7 +33,7 @@ const count = () => (db.prepare('SELECT COUNT(*) AS n FROM annotations').get() a
 
 describe('annotations repo', () => {
   it('the migration (version 4) creates the table; the schema is now at version 6', () => {
-    expect(db.pragma('user_version', { simple: true })).toBe(7)
+    expect(db.pragma('user_version', { simple: true })).toBe(8)
     expect(db.prepare("SELECT name FROM sqlite_master WHERE name = 'annotations'").all()).toHaveLength(1)
   })
   it('round-trips every kind, in order, per workspace', () => {

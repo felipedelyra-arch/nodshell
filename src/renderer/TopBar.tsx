@@ -1,15 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
 import { AboutDialog } from './chrome/InfoDialogs'
 import { liveAgentCount } from './graph'
+import { usedPercent, WARN_AT } from './chrome/memoryUsage'
 import { MAX_WORKSPACES, useCanvas } from './store'
+import { useBusy } from './chrome/useBusy'
 
-const HOME_TIP = 'Home arrives in a later phase'
+const HOME_TIP = 'Home is not available yet'
 
 /** A top-bar chip. With `tip` it is visibly and semantically disabled and the tip says why; otherwise it runs `onClick`. */
-function Chip({ id, tip, onClick, children, label, testId }: { id: string; tip?: string; onClick?: () => void; children: React.ReactNode; label?: string; testId?: string }) {
+function Chip({ id, tip, onClick, children, label, testId }: { id: string; tip?: string; onClick?: () => unknown; children: React.ReactNode; label?: string; testId?: string }) {
+  const [busy, run] = useBusy()
   return (
     <>
-      <button type="button" className="topbar-link" data-testid={testId} aria-disabled={tip ? true : undefined} aria-label={label} aria-describedby={tip ? id : undefined} data-tip={tip} onClick={() => !tip && onClick?.()}>
+      <button type="button" className="topbar-link" data-testid={testId} aria-disabled={tip ? true : undefined} aria-busy={busy || undefined} aria-label={label} aria-describedby={tip ? id : undefined} data-tip={tip} onClick={() => !tip && onClick && void run(onClick)}>
         {children}
       </button>
       {tip && (
@@ -32,6 +35,7 @@ function ProjectMenu() {
   const repo = useCanvas((s) => s.repo)
   const openRepo = useCanvas((s) => s.openRepo)
   const [open, setOpen] = useState(false)
+  const [busy, run] = useBusy()
   const btn = useRef<HTMLButtonElement>(null)
   const menu = useRef<HTMLDivElement>(null)
   const items = () => [...(menu.current?.querySelectorAll<HTMLElement>('[role^="menuitem"]') ?? [])]
@@ -72,7 +76,8 @@ function ProjectMenu() {
         aria-haspopup={repo ? 'menu' : undefined}
         aria-expanded={repo ? open : undefined}
         aria-label={repo ? `Project ${repo.name}, menu` : 'Open folder'}
-        onClick={() => (repo ? setOpen((v) => !v) : void openRepo())}
+        aria-busy={busy || undefined}
+        onClick={() => (repo ? setOpen((v) => !v) : void run(openRepo))}
       >
         {folder}
         <span data-testid="workspace-name">{repo ? repo.name : 'Open folder'}</span>
@@ -91,7 +96,7 @@ function ProjectMenu() {
             className="menu-item"
             onClick={() => {
               close()
-              void openRepo()
+              void run(openRepo)
             }}
           >
             Open folder…
@@ -149,7 +154,7 @@ export function TopBar() {
       <Chip id="new-ws-tip" tip={addTip} label="New workspace" onClick={add}>
         +
       </Chip>
-      <Chip id="close-ws-tip" onClick={() => void close()} label="Close workspace">
+      <Chip id="close-ws-tip" onClick={() => close()} label="Close workspace">
         <span aria-hidden="true">✕</span> Close
       </Chip>
     </nav>
@@ -160,12 +165,13 @@ export function TopBar() {
 export function TopRight() {
   const live = useCanvas((s) => liveAgentCount(s.nodes))
   const mem = useCanvas((s) => s.memoryBytes)
+  const pct = usedPercent(useCanvas((s) => s.memory?.system ?? null))
   const memText = mem > 0 ? `· ${(mem / 1024 ** 3).toFixed(1)} GB` : ''
   const [about, setAbout] = useState(false)
   const btn = useRef<HTMLButtonElement>(null)
   return (
     <div className="absolute right-6 top-4 z-10 flex items-center gap-2">
-      <p className="live-badge font-mono text-[11px]" data-testid="live-badge" title={mem > 0 ? `${live} agents live. Memory of the app and all terminal processes: ${Math.round(mem / 1024 ** 2)} MB` : undefined}>
+      <p className="live-badge font-mono text-[11px]" data-testid="live-badge" title={mem > 0 ? `${live} agents live. Memory of the app and all terminal processes: ${Math.round(mem / 1024 ** 2)} MB${pct !== null && pct >= WARN_AT ? `. The system memory is at ${pct}%` : ''}` : undefined}>
         <span className={`status-dot ${live ? 'st-idle' : 'st-exited'}`} aria-hidden="true" />
         <span aria-live="polite">{live} live</span>
         {memText && <span aria-hidden="true">{memText}</span>}

@@ -1,4 +1,4 @@
-import { _electron as electron, expect, type ElectronApplication, type Page } from '@playwright/test'
+import { _electron as electron, expect, type ElectronApplication, type Locator, type Page } from '@playwright/test'
 import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -45,11 +45,28 @@ export async function newConsole(page: Page, count: number): Promise<void> {
   await expect(page.getByTestId('terminal-node')).toHaveCount(count)
 }
 
-export async function typeIn(page: Page, index: number, text: string): Promise<void> {
-  await page.getByTestId('terminal-body').nth(index).click()
+/**
+ * Types into a card's terminal. Below zoom ~0.82 an unselected card shows a summary and its terminal is hidden: the card is then opened in focus mode
+ * (double-click on the summary), typed into, and restored.
+ */
+export async function typeInCard(page: Page, card: Locator, text: string): Promise<void> {
+  const body = card.getByTestId('terminal-body')
+  const summary = !(await body.isVisible())
+  if (summary) await card.getByTestId('terminal-preview').dblclick()
+  await body.click()
   await page.keyboard.type(text)
   await page.keyboard.press('Enter')
+  if (summary) {
+    await page.keyboard.press('Control+Shift+F')
+    await expect(card).not.toHaveAttribute('data-maximized', 'true')
+  }
 }
+
+export const typeIn = (page: Page, index: number, text: string): Promise<void> =>
+  typeInCard(page, page.getByTestId('terminal-body').nth(index).locator('xpath=ancestor::*[contains(@class,"term-card")]'), text)
+
+/** What a card shows of its output: the terminal when it is on screen, else the summary. */
+export const screenOf = (card: Locator): Locator => card.locator('[data-testid=terminal-body]:visible, [data-testid=terminal-preview]')
 
 export async function readFile(path: string): Promise<string> {
   let out = ''
@@ -59,6 +76,17 @@ export async function readFile(path: string): Promise<string> {
 
 export function alive(pid: number): boolean {
   try { process.kill(pid, 0); return true } catch { return false }
+}
+
+/** Wheel over a bare spot of the board until the zoom passes `min`: cards show their terminals again (below ~0.82 they show a summary). */
+export async function zoomInPast(page: Page, min = 0.9): Promise<void> {
+  const zoom = () => page.locator('.react-flow__viewport').evaluate((el) => new DOMMatrix(getComputedStyle(el).transform).a)
+  const spot = await page.evaluate(() => {
+    for (let y = 120; y < innerHeight - 160; y += 20) for (let x = 90; x < innerWidth - 20; x += 20) if (document.elementFromPoint(x, y)?.classList.contains('react-flow__pane')) return { x, y }
+    return null
+  })
+  await page.mouse.move(spot!.x, spot!.y)
+  await expect.poll(async () => { await page.mouse.wheel(0, -200); return (await zoom()) > min }, { timeout: 30_000 }).toBe(true)
 }
 
 export async function expectGone(...pids: number[]): Promise<void> {

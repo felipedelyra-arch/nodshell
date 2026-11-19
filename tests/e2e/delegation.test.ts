@@ -53,14 +53,34 @@ test('a goal typed into the Orchestrator makes it delegate to its squad: the cou
     await expect(counter).toHaveText('0/2', { timeout: 20_000 })
     await expect(counter).toHaveAttribute('aria-label', '0 of 2 tasks done')
     await expect(counter).toHaveAttribute('title', /^Latest tasks\nrunning · \w+ · SLOW build the page part 2\nrunning · \w+ · SLOW build the page part 1$/)
+    // while the delegation runs, the FRONTEND edge's dots run from the Orchestrator to the group, fast, and the edge says so
+    const toGroup = page.locator('[data-testid=flow-edge][data-direction=toGroup][data-speed=fast]')
+    await expect(toGroup).toHaveCount(1)
+    await expect(page.getByRole('button', { name: 'Edge FRONTEND to Orchestrator, delegating, running', exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Edge BACKEND to Orchestrator, resting', exact: true })).toBeVisible()
+    // its dots run fast (rate 3) and backwards: FRONTEND sits left of the Orchestrator, so they start at the right end of the path
+    const fastDots = () =>
+      page.locator('[data-testid=flow-runners]').evaluateAll((hosts) =>
+        hosts.flatMap((h) => {
+          const a = h.querySelector('.flow-runner')!.getAnimations()[0]
+          if (!a || a.playbackRate !== 3 || a.playState !== 'running') return []
+          const x = (k: Keyframe | undefined) => Number(/translate\(([-\d.]+)px/.exec(String(k?.['transform']))?.[1])
+          const k = (a.effect as KeyframeEffect).getKeyframes()
+          return [x(k[0]) > x(k.at(-1)) ? 'right-to-left' : 'left-to-right']
+        }),
+      )
+    await expect.poll(fastDots).toEqual(['right-to-left'])
     await page.screenshot({ path: test.info().outputPath('f6.png') })
     // the members got one prompt each, from the Orchestrator
     const fe = r.runs().filter((x) => /frontend-[12]$/.test(x.cwd))
     expect(fe).toHaveLength(2)
     const got = fe.map((x) => submissions(r.logs, x.pid)).sort()
     expect(got).toEqual([[`${START}From ${lead} (orchestrator):\nSLOW build the page part 1${END}`], [`${START}From ${lead} (orchestrator):\nSLOW build the page part 2${END}`]])
+    // the members' replies pass up the FRONTEND edge: its dots turn towards the Orchestrator
+    await expect(page.locator('[data-testid=flow-edge][data-direction=toOrchestrator]')).toHaveCount(1, { timeout: 20_000 })
     // done once each has ended the turn the task started
     await expect(counter).toHaveText('2/2', { timeout: 20_000 })
+    await expect(toGroup).toHaveCount(0)
     await expect(counter).toHaveAttribute('aria-label', '2 of 2 tasks done')
     await expect(counter).toHaveAttribute('title', /done · \w+ · SLOW build the page part 2\ndone · \w+ · SLOW build the page part 1$/)
     expect(await page.evaluate(() => (window as unknown as { __csp: string[] }).__csp)).toEqual([])

@@ -1,7 +1,8 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react'
 import { PROMPT_MAX } from '../../shared/agent'
 import { isGroup, isOrchestrator, isTerminal, membersOf, type AppNode } from '../graph'
-import { useCommand, VOICE_TIP, type Scope } from './store'
+import { describePreview, statusSegment, type Preview } from './hints'
+import { micLevel, useCommand, VOICE_TIP, type Scope } from './store'
 
 /** Names `@` can reach in a scope: agents first, then groups (what main will accept; main still decides). */
 export function mentionNames(nodes: AppNode[], workspaceId: string, squadId?: string): string[] {
@@ -56,6 +57,7 @@ export function CommandInput({ fieldKey, scope, names, placeholder, label, wrapC
   }
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.nativeEvent.isComposing) return
+    if (e.key === 'Enter' && e.repeat) return e.preventDefault() // a send needs a fresh keydown, never a held key
     if (open) {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault()
@@ -87,7 +89,7 @@ export function CommandInput({ fieldKey, scope, names, placeholder, label, wrapC
 
   const busy = voice.target === fieldKey && voice.status !== 'idle'
   return (
-    <div className={wrapClass}>
+    <label className={wrapClass}>
       <input
         ref={ref}
         data-command-key={fieldKey}
@@ -99,22 +101,21 @@ export function CommandInput({ fieldKey, scope, names, placeholder, label, wrapC
         aria-activedescendant={open ? `${listId}-${active}` : undefined}
         aria-autocomplete="list"
         aria-label={label}
+        aria-describedby={text.trim() ? targetId(fieldKey) : undefined}
         autoComplete="off"
         spellCheck={false}
         maxLength={PROMPT_MAX}
-        placeholder={busy ? (voice.status === 'listening' ? 'Listening…' : 'Transcribing…') : placeholder}
+        placeholder={busy ? (voice.status === 'listening' ? 'Speak now…' : 'Your words appear here…') : placeholder} // the state itself is told once, by the status next to the field
         value={text}
         onChange={(e) => {
           walk.current = -1
           setDismissed(false)
           setActive(0)
+          useCommand.getState().setNote(fieldKey) // typing dismisses the dictation result or error
           set(fieldKey, e.target.value)
         }}
         onKeyDown={onKeyDown}
       />
-      <span role="status" className="sr-only">
-        {busy ? (voice.status === 'listening' ? 'Listening' : 'Transcribing') : ''}
-      </span>
       {open && (
         <ul id={listId} role="listbox" aria-label="Agents and groups" className="cmd-suggest nodrag nopan nowheel">
           {options.map((n, i) => (
@@ -123,6 +124,74 @@ export function CommandInput({ fieldKey, scope, names, placeholder, label, wrapC
             </li>
           ))}
         </ul>
+      )}
+    </label>
+  )
+}
+
+const targetId = (fieldKey: string) => `cmd-target-${fieldKey}`
+
+/** Input level while recording: scaled by an animation frame loop that exists only while this is mounted (recording); a still mark with reduced motion. */
+function LevelMeter() {
+  const bar = useRef<HTMLElement>(null)
+  const still = useMemo(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches, [])
+  useEffect(() => {
+    if (still) return
+    let raf = 0
+    const tick = () => {
+      if (bar.current) bar.current.style.transform = `scaleX(${Math.max(0.06, micLevel())})`
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [still])
+  return still ? (
+    <span className="cmd-rec" data-testid="rec-mark" aria-hidden="true" />
+  ) : (
+    <span className="cmd-meter" data-testid="level-meter" aria-hidden="true">
+      <i ref={bar} />
+    </span>
+  )
+}
+
+/** What a field tells the user: the dictation state (a status line) and, while it has text, who the command would reach (asked of main, which decides; advisory). */
+export function CommandHints({ fieldKey, workspaceId, squadId, className }: { fieldKey: string; workspaceId: string; squadId?: string; className: string }) {
+  const text = useCommand((s) => s.text[fieldKey] ?? '')
+  const voice = useCommand((s) => s.voice)
+  const note = useCommand((s) => s.notes[fieldKey])
+  const seg = statusSegment(voice.target === fieldKey ? voice.status : 'idle', note, Date.now())
+  const [preview, setPreview] = useState<Preview | null>(null)
+  const q = text.trim()
+  const landed = note?.kind === 'ready' && note.fieldText === text // a dictation just put this text here: ask at once
+  useEffect(() => {
+    if (!q || /^@\S*$/.test(q)) return setPreview(null) // empty, or still completing a name
+    let live = true // a late answer for older text is dropped
+    const t = setTimeout(
+      () =>
+        window.api.invoke('command:preview', { text: q, workspaceId, ...(squadId ? { squadId } : {}) }).then(
+          (p) => live && setPreview(p),
+          () => live && setPreview(null),
+        ),
+      landed ? 0 : 150,
+    )
+    return () => {
+      live = false
+      clearTimeout(t)
+    }
+  }, [q, workspaceId, squadId, landed])
+  const d = q && preview ? describePreview(preview) : null
+  return (
+    <div className={className}>
+      <span role="status" className={`cmd-status ${seg?.kind === 'error' ? 'is-error' : ''}`} data-kind={seg?.kind}>
+        {seg?.kind === 'listening' && <LevelMeter />}
+        {seg?.text}
+      </span>
+      {d && (d.ok || d.err) && (
+        <span id={targetId(fieldKey)} className="cmd-target" data-testid="command-target">
+          {d.ok}
+          {d.ok && d.err ? ' · ' : ''}
+          {d.err && <span className="is-error">{d.err}</span>}
+        </span>
       )}
     </div>
   )
@@ -133,9 +202,10 @@ export function MicButton({ fieldKey, className, children, tipId }: { fieldKey: 
   const available = useCommand((s) => s.voiceAvailable)
   const voice = useCommand((s) => s.voice)
   const mine = voice.target === fieldKey
-  const { micDown, micUp } = useCommand.getState()
-  const down = () => micDown(fieldKey)
-  const up = () => micUp(fieldKey)
+  const { voiceDown, voiceUp, voiceAbort } = useCommand.getState()
+  useEffect(() => () => voiceAbort(`mic:${fieldKey}`), [voiceAbort, fieldKey]) // a recording never outlives its button
+  const down = () => voiceDown(`mic:${fieldKey}`, fieldKey, true)
+  const up = () => voiceUp(`mic:${fieldKey}`)
   const onPointerDown = (e: PointerEvent<HTMLButtonElement>) => {
     if (e.button !== 0) return
     e.currentTarget.setPointerCapture(e.pointerId)
@@ -169,6 +239,7 @@ export function MicButton({ fieldKey, className, children, tipId }: { fieldKey: 
       }}
     >
       {children}
+      {mine && voice.status === 'listening' && <span className="listen-ring" aria-hidden="true" />}
     </button>
   )
 }

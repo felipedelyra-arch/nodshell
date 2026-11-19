@@ -2,6 +2,7 @@ import { useId, useState } from 'react'
 import { LIVE_HARD_MAX, LIVE_LIMIT_MIN } from '../../shared/agent'
 import { useCanvas } from '../store'
 import { AppDialog } from './AppDialog'
+import { useBusy } from './useBusy'
 import { useDiagnostics } from './useDiagnostics'
 
 const SHORTCUTS: [string, string][] = [
@@ -9,6 +10,7 @@ const SHORTCUTS: [string, string][] = [
   ['Shift + drag', 'select cards with a box'],
   ['Ctrl + Enter', 'send the prompt (card details)'],
   ['Esc', 'close a dialog, popover or expanded card'],
+  ['F6', 'leave a terminal or a page (Enter goes back in)'],
 ]
 
 /** The live-terminal limit: saved by main (validated there too); lowering it stops nothing that already runs. */
@@ -16,6 +18,7 @@ function LiveLimitField() {
   const limit = useCanvas((s) => s.liveLimit)
   const [text, setText] = useState(String(limit))
   const [note, setNote] = useState('')
+  const [busy, run] = useBusy()
   const id = useId()
   const n = Number(text)
   const valid = text.trim() !== '' && Number.isInteger(n) && n >= LIVE_LIMIT_MIN && n <= LIVE_HARD_MAX
@@ -25,14 +28,14 @@ function LiveLimitField() {
         useCanvas.getState().setLiveLimit(r.liveLimit)
         setNote('Saved')
       },
-      () => setNote('Could not save'),
+      () => setNote('Could not save. Try again.'),
     )
   return (
     <form
       className="mt-3"
       onSubmit={(e) => {
         e.preventDefault()
-        if (valid) void save()
+        if (valid) void run(save)
       }}
     >
       <label className="field-label" htmlFor={id}>
@@ -40,7 +43,7 @@ function LiveLimitField() {
       </label>
       <div className="flex items-center gap-2">
         <input id={id} type="number" min={LIVE_LIMIT_MIN} max={LIVE_HARD_MAX} step={1} className="field w-20" value={text} aria-invalid={!valid} onChange={(e) => (setText(e.target.value), setNote(''))} />
-        <button type="submit" className="btn-accent" disabled={!valid}>
+        <button type="submit" className="btn-accent" aria-busy={busy || undefined} disabled={!valid}>
           Save
         </button>
         <span role="status" className="text-xs text-muted">
@@ -89,7 +92,7 @@ export function BugDialog({ onClose }: { onClose: () => void }) {
           Copy
         </button>
         <span role="status" className="text-xs text-muted">
-          {copied === 'ok' ? 'Copied' : copied === 'fail' ? 'Could not copy' : ''}
+          {copied === 'ok' ? 'Copied' : copied === 'fail' ? 'Could not copy. Select the text and copy it by hand.' : ''}
         </span>
       </div>
     </AppDialog>

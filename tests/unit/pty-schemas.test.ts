@@ -34,6 +34,15 @@ describe('pty channel schemas', () => {
     expect(channels['pty:write'].in.safeParse({ id, data: 'x'.repeat(65536) }).success).toBe(true)
   })
 
+  it('validates app:memory per terminal', () => {
+    const ok = { bytes: 10, app: 4, terminals: [{ id, bytes: 6 }], system: { total: 100, available: 50 } }
+    expect(events['app:memory'].safeParse(ok).success).toBe(true)
+    expect(events['app:memory'].safeParse({ ...ok, system: null }).success).toBe(true)
+    expect(events['app:memory'].safeParse({ ...ok, app: -1 }).success).toBe(false)
+    expect(events['app:memory'].safeParse({ ...ok, terminals: [{ id, bytes: -1 }] }).success).toBe(false)
+    expect(events['app:memory'].safeParse({ ...ok, terminals: Array.from({ length: 41 }, () => ({ id, bytes: 1 })) }).success).toBe(false)
+  })
+
   it('validates events', () => {
     expect(events['pty:data'].safeParse({ id, data: 'hi' }).success).toBe(true)
     expect(events['pty:data'].safeParse({ id: 'x', data: 'hi' }).success).toBe(false)

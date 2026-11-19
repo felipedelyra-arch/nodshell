@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
-import { CommandInput, MicButton, mentionNames } from '../command/CommandInput'
-import { GLOBAL, HOLD_MS, useCommand, VOICE_TIP } from '../command/store'
+import { CommandHints, CommandInput, MicButton, mentionNames } from '../command/CommandInput'
+import { GLOBAL, useCommand, VOICE_TIP } from '../command/store'
 import { useCanvas } from '../store'
 import { KEEPS_KEYS } from '../board/focus'
 
@@ -9,35 +9,20 @@ const icon = { width: 16, height: 16, viewBox: '0 0 16 16', fill: 'none', stroke
 /** Hold Space with the focus on the board (never in a terminal, field or control): records while held. */
 function useSpaceToSpeak() {
   useEffect(() => {
-    let timer: ReturnType<typeof setTimeout> | undefined
-    let held = false
-    const release = () => {
-      clearTimeout(timer)
-      timer = undefined
-      if (held) void useCommand.getState().endVoice()
-      held = false
-    }
     const down = (e: KeyboardEvent) => {
       if (e.code !== 'Space' || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return
       const t = e.target instanceof Element ? e.target : null
       if (t?.closest(KEEPS_KEYS) || document.querySelector('[aria-modal=true], dialog[open]')) return
       if (useCommand.getState().voiceAvailable !== true) return
       e.preventDefault() // not the page scroll
-      if (e.repeat || timer || held) return
-      timer = setTimeout(() => {
-        timer = undefined
-        held = true
-        void useCommand.getState().beginVoice(GLOBAL).then((started) => !started && (held = false))
-      }, HOLD_MS)
+      if (!e.repeat) useCommand.getState().voiceDown('space', GLOBAL) // the microphone opens now; the store waits HOLD_MS before showing it
     }
-    const up = (e: KeyboardEvent) => e.code === 'Space' && release()
+    const up = (e: KeyboardEvent) => e.code === 'Space' && useCommand.getState().voiceUp('space')
     window.addEventListener('keydown', down)
     window.addEventListener('keyup', up)
-    window.addEventListener('blur', release) // the store ends the recording itself; this clears the pending hold
     return () => {
       window.removeEventListener('keydown', down)
       window.removeEventListener('keyup', up)
-      window.removeEventListener('blur', release)
     }
   }, [])
 }
@@ -89,6 +74,7 @@ export function CommandBar() {
     <div ref={bar} className="cmd-bar pointer-events-auto" role="group" aria-label="Command bar">
       <img className="cmd-logo" src="icon-mark.png" width="28" height="28" alt="" />
       <CommandInput fieldKey={GLOBAL} scope={scope} names={names} placeholder="Hold space to speak · @ to direct…" label="Command" wrapClass="cmd-field" />
+      <CommandHints fieldKey={GLOBAL} workspaceId={workspaceId} className="cmd-hints" />
       <span id={tipId} className="sr-only">
         {VOICE_TIP}
       </span>
@@ -129,7 +115,7 @@ export function CommandBar() {
           </ul>
         )}
       </div>
-      <button type="button" className="cmd-btn cmd-send" aria-label="Send" aria-disabled={!canSend || undefined} onClick={() => canSend && void useCommand.getState().send(GLOBAL, scope())}>
+      <button type="button" className="cmd-btn cmd-send" aria-label="Send" aria-busy={sending || undefined} aria-disabled={!canSend || undefined} onClick={() => canSend && void useCommand.getState().send(GLOBAL, scope())}>
         <svg {...icon}>
           <path d="M8 12.5v-9M4 7.5l4-4 4 4" />
         </svg>

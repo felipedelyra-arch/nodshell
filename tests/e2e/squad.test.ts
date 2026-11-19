@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { cleanupTemp, expectGone, launch, newConsole } from './helpers'
+import { cleanupTemp, expectGone, launch, newConsole, zoomInPast } from './helpers'
 import { openRepo, setupRepo, spawnPreset } from './repo'
 
 test.afterEach(cleanupTemp)
@@ -113,6 +113,7 @@ test('squad: layout, live Orchestrator list, expand and restore, stacking, no ro
     // a member works: its badge follows the hooks live
     const zoe = feNames[0]!
     const row = orch.locator(`[data-testid=orch-row][data-name="${zoe}"]`).getByTestId('orch-row-status')
+    await zoomInPast(page) // a fitted squad shows summaries; typing needs the terminal
     await page.locator(`[data-testid=agent-node][data-name="${zoe}"]`).getByTestId('terminal-body').click()
     await page.keyboard.type('do some work')
     await page.keyboard.press('Enter')

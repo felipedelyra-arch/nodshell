@@ -168,6 +168,11 @@ export class PtyManager {
     return [...this.ptys.values()].filter((e) => !e.killing).map((e) => e.proc.pid)
   }
 
+  /** Id and leader pid of every live terminal of one owner (for the per-terminal memory). */
+  leaders(ownerId: number): { id: string; pid: number }[] {
+    return [...this.ptys.values()].filter((e) => e.ownerId === ownerId && !e.killing).map((e) => ({ id: e.id, pid: e.proc.pid }))
+  }
+
   private flush(e: Entry): void {
     clearTimeout(e.timer)
     e.timer = undefined

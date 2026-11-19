@@ -17,6 +17,7 @@ export function HandoffSection({ agentId, name, agent, workspaceId }: { agentId:
   const why = paused ? 'Everything is paused, resume all first' : agent.state !== 'idle' ? `${name} must be resting to write its summary` : targets.length === 0 ? 'No other agent on this board' : null
 
   const call = async (fn: () => Promise<unknown>, fallback: string) => {
+    if (busy) return
     setBusy(true)
     try {
       await fn()
@@ -55,7 +56,8 @@ export function HandoffSection({ agentId, name, agent, workspaceId }: { agentId:
         <button
           type="button"
           className="btn-accent"
-          disabled={!!why || busy || !toId}
+          aria-busy={busy || undefined}
+          disabled={!!why || !toId}
           aria-describedby={ids.hint}
           onClick={() => void call(() => window.api.invoke('handoff:start', { fromId: agentId, toId }), 'Could not start the handoff.')}
         >

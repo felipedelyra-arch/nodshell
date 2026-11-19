@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { GroupRegistry } from '../../src/main/application/groups'
-import { AGENT_BYTES, checkCapacity, RESERVE_BYTES, Slots, spawnMany } from '../../src/main/application/spawnMany'
+import { agentCost, AGENT_BYTES, checkCapacity, RESERVE_BYTES, Slots, spawnMany } from '../../src/main/application/spawnMany'
 import type { SpawnedAgent } from '../../src/main/application/agents'
 import { MAX_LIVE } from '../../src/shared/agent'
 import type { Repo } from '../../src/main/domain/agent'
@@ -64,6 +64,24 @@ function deps(failAt: number[] = [], free = MAX_LIVE, exitAt: number[] = []) {
   const slots = new Slots(() => MAX_LIVE - free + live.size, MAX_LIVE)
   return { d: { presets: { get: (x: string) => (x === 'p1' ? preset : undefined) }, agents: { spawn }, groups, slots }, spawn, groups, slots }
 }
+
+describe('Slots: measured memory per agent', () => {
+  const G = 2 ** 30
+  it('budgets by the measured figure', () => {
+    expect(new Slots(() => 0, MAX_LIVE, () => RESERVE_BYTES + 5 * G, Date.now, () => 2 * G).free()).toBe(2)
+  })
+  it('never goes below the floor, and defaults to it', () => {
+    const avail = () => RESERVE_BYTES + 3.5 * AGENT_BYTES
+    expect(new Slots(() => 0, MAX_LIVE, avail, Date.now, () => 1).free()).toBe(3)
+    expect(new Slots(() => 0, MAX_LIVE, avail).free()).toBe(3)
+  })
+  it('agentCost ignores unsettled agents and falls back to the floor', () => {
+    expect(agentCost([])).toBe(AGENT_BYTES)
+    expect(agentCost([{ bytes: 9 * G, ageMs: 1000 }])).toBe(AGENT_BYTES)
+    expect(agentCost([{ bytes: 2 * G, ageMs: 40_000 }, { bytes: 3 * G, ageMs: 60_000 }, { bytes: 9 * G, ageMs: 5 }])).toBe(2.5 * G)
+    expect(agentCost([{ bytes: G, ageMs: 40_000 }])).toBe(AGENT_BYTES)
+  })
+})
 
 describe('Slots: what fits in memory', () => {
   it('counts free memory, the slots a batch holds and the terminals that just started', () => {

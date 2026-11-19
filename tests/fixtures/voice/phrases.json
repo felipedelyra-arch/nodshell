@@ -1,0 +1,22 @@
+[
+  { "id": "s1", "text": "Faz o commit agora.", "terms": ["commit"] },
+  { "id": "s2", "text": "Gia, abre um pull request.", "terms": ["Gia", "pull request"] },
+  { "id": "s3", "text": "Roda o deploy na Vercel.", "terms": ["deploy", "Vercel"] },
+  { "id": "s4", "text": "Pausa todos os agentes.", "terms": [] },
+  { "id": "s5", "text": "Ian, qual é a branch atual?", "terms": ["Ian", "branch"] },
+  { "id": "s6", "text": "Max, roda os testes de novo.", "terms": ["Max"] },
+  { "id": "m1", "text": "Léo, cria um worktree novo e faz o commit das mudanças do backend.", "terms": ["Léo", "worktree", "commit", "backend"] },
+  { "id": "m2", "text": "Opal, revisa o pull request do frontend antes de ir para produção.", "terms": ["Opal", "pull request", "frontend"] },
+  { "id": "m3", "text": "O Orchestrator precisa dividir essa tarefa entre o backend e o frontend.", "terms": ["Orchestrator", "backend", "frontend"] },
+  { "id": "m4", "text": "Conecta o Supabase no projeto Next.js e testa o login com a conta de teste.", "terms": ["Supabase", "Next.js"] },
+  { "id": "m5", "text": "Gia, o Claude Code travou na pergunta de confiança da pasta, olha isso.", "terms": ["Gia", "Claude Code"] },
+  { "id": "m6", "text": "Troca para a branch de correção e roda o lint antes de qualquer coisa.", "terms": ["branch"] },
+  { "id": "m7", "text": "Ian, confere se o deploy da Vercel terminou sem erro nenhum.", "terms": ["Ian", "deploy", "Vercel"] },
+  { "id": "m8", "text": "Pede para o Claude resumir o que mudou nessa conversa e manda para o Max.", "terms": ["Claude", "Max"] },
+  { "id": "l1", "text": "Léo, cria um worktree novo a partir da branch principal, implementa a tela de configurações no frontend e faz o commit de cada etapa com uma mensagem curta e clara.", "terms": ["Léo", "worktree", "branch", "frontend", "commit"] },
+  { "id": "l2", "text": "Quando o Orchestrator terminar de dividir as tarefas, quero que a Opal revise o código do backend e a Gia escreva os testes antes de abrir o pull request.", "terms": ["Orchestrator", "Opal", "backend", "Gia", "pull request"] },
+  { "id": "l3", "text": "Configura o projeto Next.js para usar o Supabase como banco de dados, cria as tabelas de usuários e de pedidos e depois faz o deploy de teste na Vercel para eu conferir.", "terms": ["Next.js", "Supabase", "deploy", "Vercel"] },
+  { "id": "l4", "text": "Ian, olha o histórico de commits da última semana, me diz o que mudou em cada branch e avisa o Max se algum teste importante deixou de rodar por causa dessas mudanças.", "terms": ["Ian", "commit", "branch", "Max"] },
+  { "id": "l5", "text": "Preciso que o Claude Code leia o código inteiro do frontend, encontre os componentes que estão repetidos e proponha uma refatoração pequena, sem mexer no que já está funcionando bem hoje.", "terms": ["Claude Code", "frontend"] },
+  { "id": "l6", "text": "Se o deploy falhar de novo, pausa todos os agentes, volta o último commit estável na branch principal e me explica com calma qual foi o motivo da falha, passo a passo, para eu decidir.", "terms": ["deploy", "commit", "branch"] }
+]

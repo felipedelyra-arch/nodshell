@@ -147,6 +147,10 @@ const MIGRATIONS: ((db: Db) => void)[] = [
     // F10: app settings (key/value; today only the live-terminal limit)
     db.exec('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
   },
+  (db) => {
+    // T4.3: a web tile's viewport preset (page width in CSS px); NULL = Fit, which is what every earlier row means
+    db.exec('ALTER TABLE web_tiles ADD COLUMN page_width INTEGER')
+  },
 ]
 
 export function migrate(db: Db): void {

@@ -72,8 +72,8 @@ export function SpawnPopover({ onClose }: { onClose: () => void }) {
         <button type="button" className="btn-quiet" onClick={onClose}>
           Cancel
         </button>
-        <button type="submit" className="btn-accent" disabled={!chosen || busy}>
-          {busy ? 'Starting…' : `Spawn ${count}`}
+        <button type="submit" className="btn-accent" aria-busy={busy || undefined} disabled={!chosen}>
+          {`Spawn ${count}`}
         </button>
       </div>
     </form>

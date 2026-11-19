@@ -16,7 +16,7 @@ import { HandoffService, type Handoff } from './application/handoff'
 import type { Loop, SavedLoop } from './domain/loop'
 import { SqliteLoopRepo } from './infrastructure/db/loops'
 import { callTool, toolList, type ToolDeps } from './application/mcpTools'
-import { AGENT_BYTES, RESERVE_BYTES, Slots, spawnMany } from './application/spawnMany'
+import { agentCost, AGENT_BYTES, RESERVE_BYTES, Slots, spawnMany } from './application/spawnMany'
 import { SquadSpawner, type SpawnQuestion } from './application/spawnAgent'
 import { SquadRegistry } from './application/squads'
 import { TaskBoard } from './application/tasks'
@@ -49,17 +49,19 @@ import { McpService } from './infrastructure/mcp/config'
 import { McpServer } from './infrastructure/mcp/server'
 import { PAUSED_MESSAGE, PtyManager } from './infrastructure/pty/manager'
 import { spawnNodePty } from './infrastructure/pty/nodePty'
-import { availableBytes, sessionRss } from './infrastructure/pty/session'
+import { availableBytes, sessionRssBy, totalBytes } from './infrastructure/pty/session'
 import { which } from './infrastructure/which'
 import { handle } from './ipc/router'
 import { IpcError } from './ipc/validate'
 import { buildCsp, buildWebPreferences, isAllowedNavigation, isMicrophoneAllowed, resolveAppPath } from './security'
-import { sendCommand } from './application/commands'
+import { previewCommand, sendCommand } from './application/commands'
 import { whisperFromEnv } from './infrastructure/stt/whisper'
-import { isTileContents, WebTileManager } from './infrastructure/webtiles'
+import { exitCodeOf, isTileContents, recentFailures, recordFailure, WebTileManager } from './infrastructure/webtiles'
+import { childType, goneReason } from './domain/webtile'
 import { SqliteWebTileRepo, type SavedTile } from './infrastructure/db/webtiles'
 import { normalizeAddress, WebTileError } from './domain/webtile'
-import { WEBTILES_MAX } from '../shared/webtile'
+import { UrlSuggester } from './domain/urlsuggest'
+import { WEBTILES_MAX, type PageWidth } from '../shared/webtile'
 
 // Test-only override of the data directory; ignored in packaged builds.
 const userDataOverride = process.env['NODSHELL_USER_DATA']
@@ -270,14 +272,29 @@ void app.whenReady().then(async () => {
     },
     randomUUID,
   )
+  // offers to open a localhost address a terminal printed; not when the window is at the tile limit or has a tile there already
+  const suggester = new UrlSuggester(Date.now, (ownerId, address) => {
+    if (tiles.count(ownerId) >= WEBTILES_MAX) return false
+    const host = new URL(address).host
+    return !tiles.list(ownerId).some((t) => {
+      try {
+        return new URL(t.url).host === host
+      } catch {
+        return false
+      }
+    })
+  })
   const ptys = new PtyManager((ownerId, event, payload) => {
     send(ownerId, event, payload)
     if (event === 'pty:data') {
       const { id, data } = payload as EventPayload<'pty:data'>
       loops.onOutput(ownerId, id, data)
+      const address = suggester.feed(ownerId, id, data)
+      if (address) send(ownerId, 'webtile:suggest', { terminalId: id, address })
     }
     if (event === 'pty:exit') {
       const { id, code } = payload as EventPayload<'pty:exit'>
+      suggester.forget(id)
       agents.signal(id, { type: 'exited', code })
     }
   }, spawnNodePty)
@@ -332,7 +349,8 @@ void app.whenReady().then(async () => {
   const injected = new Map<string, number>() // per agent: app deliveries whose UserPromptSubmit has not come back yet
   const groups = new GroupRegistry((ownerId, id) => ptys.owns(ownerId, id), randomUUID)
   const squads = new SquadRegistry(randomUUID)
-  const slots = new Slots(() => ptys.size, () => ptys.limit, availBytes)
+  let perAgentBytes = AGENT_BYTES // measured by reportMemory
+  const slots = new Slots(() => ptys.size, () => ptys.limit, availBytes, Date.now, () => perAgentBytes)
   const reasonText = (r: string) => cleanLine(r).slice(0, REASON_MAX) // reasons may name what an agent sent; shown in toasts and the editor
   const edgeDto = (e: Edge) => ({ id: e.id, workspaceId: e.workspaceId, source: { ...e.source }, target: { ...e.target }, template: e.template, condition: e.condition, paused: e.paused === null ? null : reasonText(e.paused), note: e.note === null ? null : reasonText(e.note) })
   const flowState = (o: number) => send(o, 'flow:changed', { edges: flow.list(o).map(edgeDto), paused: ptys.isStopped(o), flowsPaused: flow.flowsPaused(o) })
@@ -548,7 +566,7 @@ void app.whenReady().then(async () => {
   const savedTiles = (o: number): SavedTile[] =>
     tiles.list(o).map((t) => {
       const l = layout?.nodes.find((n) => n.id === t.id)
-      return { id: t.id, workspaceId: l?.workspaceId ?? t.workspaceId, url: t.url, x: l?.x ?? 0, y: l?.y ?? 0, w: l?.w ?? 0, h: l?.h ?? 0 }
+      return { id: t.id, workspaceId: l?.workspaceId ?? t.workspaceId, url: t.url, x: l?.x ?? 0, y: l?.y ?? 0, w: l?.w ?? 0, h: l?.h ?? 0, pageWidth: t.pageWidth }
     })
   const persistNow = () => {
     clearTimeout(saveTimer)
@@ -635,6 +653,7 @@ void app.whenReady().then(async () => {
       detach()
     }
   }
+  app.on('child-process-gone', (_e, d) => recordFailure({ kind: 'child', reason: goneReason(d.reason), exitCode: exitCodeOf(d), type: childType(d.type) }))
   app.on('browser-window-created', (_e, win) => {
     const ownerId = win.webContents.id
     // the page is replaced (reload) or its renderer died: its tile nodes are gone, so are their views
@@ -644,7 +663,10 @@ void app.whenReady().then(async () => {
         handoffs.dropOwner(ownerId) // nothing of a handoff survives the page (no dialog would show it)
       }
     })
-    win.webContents.on('render-process-gone', () => tiles.dropOwned(ownerId))
+    win.webContents.on('render-process-gone', (_e, d) => {
+      recordFailure({ kind: 'app-renderer', reason: goneReason(d.reason), exitCode: exitCodeOf(d) })
+      tiles.dropOwned(ownerId)
+    })
     win.on('close', (e) => {
       if (leaving) return
       e.preventDefault()
@@ -752,7 +774,7 @@ void app.whenReady().then(async () => {
       // the start-up cleanup gets them
     }
   }
-  type ReopenedTile = { id: string; workspaceId: string; title: string; address: string; x: number; y: number; w: number; h: number }
+  type ReopenedTile = { id: string; workspaceId: string; title: string; address: string; x: number; y: number; w: number; h: number; pageWidth: PageWidth | null }
   /** The project's saved web tiles in these workspaces, opened again (each address checked again first), within the window's limit. */
   const reopenTiles = (senderId: number, root: string, wsIds: ReadonlySet<string>): ReopenedTile[] => {
     let saved: SavedTile[]
@@ -768,8 +790,8 @@ void app.whenReady().then(async () => {
       if (!win || tiles.count(senderId) >= WEBTILES_MAX) break
       if (!wsIds.has(s.workspaceId)) continue
       try {
-        const t = tiles.create(senderId, win, s.workspaceId, normalizeAddress(s.url))
-        out.push({ id: t.id, workspaceId: s.workspaceId, title: t.title, address: t.address, x: fit(s.x, -1_000_000, 1_000_000), y: fit(s.y, -1_000_000, 1_000_000), w: fit(s.w, 0, 100_000), h: fit(s.h, 0, 100_000) })
+        const t = tiles.create(senderId, win, s.workspaceId, normalizeAddress(s.url), s.pageWidth)
+        out.push({ id: t.id, workspaceId: s.workspaceId, title: t.title, address: t.address, x: fit(s.x, -1_000_000, 1_000_000), y: fit(s.y, -1_000_000, 1_000_000), w: fit(s.w, 0, 100_000), h: fit(s.h, 0, 100_000), pageWidth: s.pageWidth })
       } catch {
         // not a valid address any more: dropped
       }
@@ -922,7 +944,7 @@ void app.whenReady().then(async () => {
       })
       const free = slots.free()
       // the event carries at most 200: an agent beyond that simply stays saved
-      send(senderId, 'board:choose', { terminals: terminals.slice(0, 200), room: Number.isFinite(free) ? Math.max(0, free) : null })
+      send(senderId, 'board:choose', { terminals: terminals.slice(0, 200), room: Number.isFinite(free) ? Math.max(0, free) : null, agentBytes: Math.round(slots.agentBytes) })
     })
   handle('board:chosen', appOrigin, ({ ids }, { senderId }) => (choosers.get(senderId)?.(ids), { ok: true as const }))
   // once per app run: the last project comes back by itself if it still is a git repository (else the app starts empty, silently)
@@ -1013,6 +1035,8 @@ void app.whenReady().then(async () => {
   )
   handle('webtile:navigate', appOrigin, ({ id, address }, { senderId }) => safe('Could not open the page', () => (tiles.navigate(senderId, id, normalizeAddress(address)), { ok: true as const })))
   handle('webtile:reload', appOrigin, ({ id }, { senderId }) => safe('Could not reload the page', () => (tiles.reload(senderId, id), { ok: true as const })))
+  handle('webtile:back', appOrigin, ({ id }, { senderId }) => safe('Could not go back', () => (tiles.back(senderId, id), { ok: true as const })))
+  handle('webtile:forward', appOrigin, ({ id }, { senderId }) => safe('Could not go forward', () => (tiles.forward(senderId, id), { ok: true as const })))
   handle('webtile:close', appOrigin, ({ id }, { senderId }) => safe('Could not close the web tile', () => (tiles.close(senderId, id), { ok: true as const })))
   handle('webtile:place', appOrigin, (p, { senderId }) => safe('Unknown web tile', () => (tiles.place(senderId, p), { ok: true as const })))
   handle('webtile:focus', appOrigin, ({ id }, { senderId }) => safe('Could not focus the page', () => (tiles.focus(senderId, id), { ok: true as const })))
@@ -1073,6 +1097,7 @@ void app.whenReady().then(async () => {
       consoles: ptys.size,
       agents: agents.size,
       maxProcesses: ptys.limit,
+      failures: recentFailures(),
     })
   handle('app:diagnostics', appOrigin, () => ({ version: app.getVersion(), text: diagnostics() }))
   handle('app:copyDiagnostics', appOrigin, () => (clipboard.writeText(diagnostics()), { ok: true as const }))
@@ -1157,12 +1182,17 @@ void app.whenReady().then(async () => {
     }),
   )
   // typed or dictated command: the same delivery path and rules as the manual prompt; the renderer never picks the target
+  const commandView = {
+    state: (o: number) => ({ agents: agents.list(o).map(({ id, name, role, workspaceId: w, state, statusUnavailable }) => ({ id, name, role, workspaceId: w, state, statusUnavailable })), groups: groups.list(o), squads: squads.list(o) }),
+    paused: (o: number) => ptys.isStopped(o),
+  }
+  // advisory and side-effect free: the same plan as command:send, nothing is submitted
+  handle('command:preview', appOrigin, ({ text, workspaceId, squadId }, { senderId }) => safe('Could not preview the command', () => previewCommand(commandView, senderId, { workspaceId, squadId }, text)))
   handle('command:send', appOrigin, ({ text, workspaceId, squadId }, { senderId }) =>
     safe('Could not send the command', () =>
       sendCommand(
         {
-          state: (o) => ({ agents: agents.list(o).map(({ id, name, role, workspaceId: w, state, statusUnavailable }) => ({ id, name, role, workspaceId: w, state, statusUnavailable })), groups: groups.list(o), squads: squads.list(o) }),
-          paused: (o) => ptys.isStopped(o),
+          ...commandView,
           submit: async (o, id, t) => {
             flow.userPrompt(id) // the user's prompt starts a new chain
             spawner.userPrompted(id)
@@ -1182,7 +1212,7 @@ void app.whenReady().then(async () => {
   handle('voice:transcribe', appOrigin, ({ pcm }, { senderId }) => safe('Could not transcribe', async () => {
       sttOwner = senderId
       try {
-        return { text: await stt.transcribe(pcm) }
+        return { text: await stt.transcribe(pcm, { names: [...agents.list(senderId).map((a) => a.name), ...groups.list(senderId).map((g) => g.name)] }) }
       } finally {
         sttOwner = null
       }
@@ -1202,13 +1232,31 @@ void app.whenReady().then(async () => {
     }),
   )
   // memory of the app (all its Electron processes) plus every terminal's process tree, shown next to the live count
+  const firstSeen = new Map<string, number>() // terminal id -> when reportMemory first saw it
   const reportMemory = () => {
     const wins = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed())
     if (wins.length === 0) return
-    const pids = ptys.pids()
-    const appKb = app.getAppMetrics().reduce((n, m) => n + m.memory.workingSetSize, 0)
-    const bytes = Math.round(appKb * 1024 + sessionRss(pids))
-    for (const w of wins) send(w.webContents.id, 'app:memory', { bytes })
+    const app_ = Math.round(app.getAppMetrics().reduce((n, m) => n + m.memory.workingSetSize, 0) * 1024)
+    const rss = sessionRssBy(ptys.pids())
+    const total = totalBytes()
+    const avail = availBytes()
+    const system = total !== null && avail !== null ? { total, available: Math.round(avail) } : null
+    const t = Date.now()
+    const live = new Set<string>()
+    const measured: { bytes: number; ageMs: number }[] = []
+    for (const w of wins) {
+      const o = w.webContents.id
+      const terminals = ptys.leaders(o).map((l) => ({ id: l.id, bytes: rss.get(l.pid) ?? 0 }))
+      for (const x of terminals) {
+        live.add(x.id)
+        if (!firstSeen.has(x.id)) firstSeen.set(x.id, t)
+        if (agents.has(o, x.id)) measured.push({ bytes: x.bytes, ageMs: t - (firstSeen.get(x.id) ?? t) })
+      }
+      const bytes = app_ + terminals.reduce((n, t) => n + t.bytes, 0)
+      send(w.webContents.id, 'app:memory', { bytes, app: app_, terminals, system })
+    }
+    for (const id of firstSeen.keys()) if (!live.has(id)) firstSeen.delete(id)
+    perAgentBytes = agentCost(measured)
   }
   setTimeout(reportMemory, 1500).unref()
   setInterval(reportMemory, 5000).unref()

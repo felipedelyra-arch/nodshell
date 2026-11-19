@@ -28,7 +28,7 @@ const watch: SavedLoop = { id: id(3), workspaceId: id(9), agentId: id(13), promp
 
 describe('loops repo', () => {
   it('the migration (version 6) creates the table', () => {
-    expect(db.pragma('user_version', { simple: true })).toBe(7)
+    expect(db.pragma('user_version', { simple: true })).toBe(8)
     expect(db.prepare("SELECT name FROM sqlite_master WHERE name = 'loops'").all()).toHaveLength(1)
   })
   it('round-trips every kind of trigger, in order, and a save replaces the list', () => {

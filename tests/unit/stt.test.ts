@@ -3,7 +3,7 @@ import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import { PCM_MAX_BYTES, wavFromPcm } from '../../src/main/infrastructure/stt/provider'
-import { clean, WhisperCppProvider } from '../../src/main/infrastructure/stt/whisper'
+import { buildPrompt, clean, DEFAULT_VOCABULARY, whisperArgs, whisperLang, whisperThreads, WhisperCppProvider } from '../../src/main/infrastructure/stt/whisper'
 
 const dir = mkdtempSync(join(tmpdir(), 'stt-test-'))
 afterAll(() => rmSync(dir, { recursive: true, force: true }))
@@ -36,6 +36,41 @@ describe('clean', () => {
   it('keeps one line of plain text, without markers or control characters', () => {
     expect(clean(' Hello\x1b[31m\n  world [BLANK_AUDIO]\u0007 ')).toBe('Hello [31m world')
     expect(clean('x'.repeat(50), 10)).toHaveLength(10)
+  })
+})
+
+describe('whisper argv', () => {
+  it('threads: cores - 4, between 4 and 8', () => {
+    expect([2, 4, 8, 12, 32].map(whisperThreads)).toEqual([4, 4, 4, 8, 8])
+  })
+  it('language: pt unless auto or a 2-letter code', () => {
+    expect([undefined, 'auto', 'en', 'PT', 'portuguese', 'e', '', 'pt;'].map(whisperLang)).toEqual(['pt', 'auto', 'en', 'pt', 'pt', 'pt', 'pt', 'pt'])
+  })
+  it('prompt has the vocabulary and the names', () => {
+    const p = buildPrompt(DEFAULT_VOCABULARY, ['Gia', 'Léo'])
+    for (const w of ['Claude Code', 'Supabase', 'Next.js', 'worktree', 'pull request', 'Orchestrator', 'Gia', 'Léo']) expect(p).toContain(w)
+    expect(buildPrompt('custom words', ['Max'])).toBe('custom words Nomes: Max.')
+  })
+  it('prompt strips control and shell characters, long names, and is capped', () => {
+    const p = buildPrompt('a; $(rm) | `x` "q" <b> >c\nd\x07e', ['ok', 'x'.repeat(41), 'Zoe\n; ls'])
+    expect(p).not.toMatch(/[;$()|`"<>\n]/)
+    expect(p).not.toContain('\x07')
+    expect(p).toContain('ok')
+    expect(p).not.toContain('xxxx')
+    expect(buildPrompt('word '.repeat(500), [])).toHaveLength(599)
+    expect(buildPrompt('v', Array.from({ length: 100 }, (_, i) => `n${i}`)).split(',').length).toBeLessThanOrEqual(40)
+  })
+  it('a prompt can never start with a dash; empty means no --prompt', () => {
+    for (const p of [buildPrompt('', ['--model']), buildPrompt('--model x', []), buildPrompt('- -l', ['-x'])]) expect(p.startsWith('-')).toBe(false)
+    const a = whisperArgs({ model: 'm', lang: 'pt', threads: 8, prompt: buildPrompt('', []) })
+    expect(a).not.toContain('--prompt')
+    expect(whisperArgs({ model: 'm', lang: 'pt', threads: 8, prompt: 'hi' })).toEqual(['-m', 'm', '-f', '-', '-nt', '-np', '-l', 'pt', '-t', '8', '--prompt', 'hi', '-of', '/dev/null'])
+  })
+  it('the provider passes lang, threads and prompt (names included) to the binary', async () => {
+    const bin = fake('argv', "process.stdout.write(JSON.stringify(process.argv.slice(2)))")
+    const a = JSON.parse(await new WhisperCppProvider({ bin, model, lang: 'en', threads: 6, vocabulary: 'Meu vocabulario' }).transcribe(pcm, { names: ['Gia'] })) as string[]
+    expect(a.slice(a.indexOf('-l'), a.indexOf('-l') + 4)).toEqual(['-l', 'en', '-t', '6'])
+    expect(a[a.indexOf('--prompt') + 1]).toBe('Meu vocabulario Nomes: Gia.')
   })
 })
 
@@ -95,7 +130,7 @@ const wav = join(base, 'src', 'samples', 'jfk.wav')
 describe.skipIf(![bin, join(base, 'models', 'ggml-base.bin'), wav].every(existsSync))('WhisperCppProvider (real whisper.cpp)', () => {
   it('transcribes jfk.wav', async () => {
     const data = readFileSync(wav)
-    const text = await new WhisperCppProvider({ bin, model: join(base, 'models', 'ggml-base.bin') }).transcribe(new Uint8Array(data.subarray(44)))
+    const text = await new WhisperCppProvider({ bin, model: join(base, 'models', 'ggml-base.bin'), lang: 'en' }).transcribe(new Uint8Array(data.subarray(44)))
     expect(text.toLowerCase()).toContain('country')
   }, 60_000)
 })

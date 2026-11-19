@@ -1,8 +1,9 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { validateCwd } from '../../src/main/infrastructure/pty/cwd'
+import { sessionRssBy, totalBytes } from '../../src/main/infrastructure/pty/session'
 import { filterEnv, pickShell } from '../../src/main/infrastructure/pty/shell'
 
 describe('validateCwd', () => {
@@ -57,5 +58,14 @@ describe('filterEnv', () => {
       NODE_OPTIONS: '--inspect', VITE_FOO: '1', NODSHELL_USER_DATA: '/t', UNSET: undefined,
     })
     expect(env).toEqual({ HOME: '/h', PATH: '/bin', TERM: 'xterm-256color' })
+  })
+})
+
+describe('sessionRssBy', () => {
+  it('reports RSS of a live session and nothing for an unknown one', () => {
+    const sid = Number(/^\d+ \(.*\) . -?\d+ -?\d+ (-?\d+)/.exec(readFileSync('/proc/self/stat', 'utf8'))?.[1])
+    expect(sessionRssBy([sid]).get(sid)).toBeGreaterThan(0)
+    expect(sessionRssBy([2 ** 30]).has(2 ** 30)).toBe(false)
+    expect(totalBytes()).toBeGreaterThan(0)
   })
 })

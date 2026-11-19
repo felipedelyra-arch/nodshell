@@ -1,10 +1,11 @@
 import { Handle, Position, useUpdateNodeInternals, type NodeProps } from '@xyflow/react'
 import { memo, useEffect, useId, useMemo } from 'react'
-import { CommandInput, MicButton, mentionNames } from '../command/CommandInput'
+import { CommandHints, CommandInput, MicButton, mentionNames } from '../command/CommandInput'
 import { squadKey, useCommand, VOICE_TIP } from '../command/store'
 import { statusPill } from '../../shared/agent'
 import { isAlive, isGroup, isTerminal, membersOf, type OrchestratorFlowNode, type TerminalFlowNode } from '../graph'
 import { useCanvas } from '../store'
+import { useBusy } from '../chrome/useBusy'
 
 const icon = { width: 13, height: 13, viewBox: '0 0 12 12', fill: 'none', stroke: 'currentColor', strokeWidth: 1.3, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true } as const
 // shortcut: every agent runs Claude until other adapters exist (F9); then agentInfo should carry the adapter label
@@ -26,6 +27,8 @@ export const OrchestratorNode = memo(function OrchestratorNode({ id, data, selec
   const workspaceId = data.workspaceId ?? ''
   const names = useMemo(() => mentionNames(nodes, workspaceId, id), [nodes, workspaceId, id])
   const canSend = useCommand((s) => (s.text[key] ?? '').trim() !== '' && !s.sending[key])
+  const sending = useCommand((s) => s.sending[key] ?? false)
+  const [connecting, runConnect] = useBusy()
   const voiceOk = useCommand((s) => s.voiceAvailable === true)
   const lead = nodes.find((n): n is TerminalFlowNode => n.id === data.orchestratorId && isTerminal(n))
   const sections = data.groups.flatMap(({ id: gid }) => {
@@ -79,7 +82,7 @@ export const OrchestratorNode = memo(function OrchestratorNode({ id, data, selec
         <span data-testid="orch-summary">
           {agents} agents · {sections.length} groups
         </span>
-        <button type="button" className="orch-connect nodrag" title="Connect the groups to the Orchestrator" onClick={() => void connectSquad(id)}>
+        <button type="button" className="orch-connect nodrag" title="Connect the groups to the Orchestrator" aria-busy={connecting || undefined} onClick={() => void runConnect(() => connectSquad(id))}>
           Connect
         </button>
       </div>
@@ -114,6 +117,7 @@ export const OrchestratorNode = memo(function OrchestratorNode({ id, data, selec
           </section>
         ))}
       </div>
+      <CommandHints fieldKey={key} workspaceId={workspaceId} squadId={id} className="orch-hints" />
       <div className="orch-foot">
         <CommandInput fieldKey={key} scope={() => ({ workspaceId, squadId: id })} names={names} placeholder={`Command ${agents} agents · @ to direct…`} label="Command the squad" wrapClass="orch-field" />
         <span id={`${ids}-cmd`} className="sr-only">
@@ -124,7 +128,7 @@ export const OrchestratorNode = memo(function OrchestratorNode({ id, data, selec
             <path d="M1.5 4.5v-3h3M7.5 1.5h3v3M10.5 7.5v3h-3M4.5 10.5h-3v-3" />
           </svg>
         </button>
-        <button type="button" className="icon-btn nodrag" aria-label="Send command" aria-disabled={!canSend || undefined} onClick={() => canSend && void useCommand.getState().send(key, { workspaceId, squadId: id })}>
+        <button type="button" className="icon-btn nodrag" aria-label="Send command" aria-busy={sending || undefined} aria-disabled={!canSend || undefined} onClick={() => canSend && void useCommand.getState().send(key, { workspaceId, squadId: id })}>
           <svg {...icon}>
             <path d="M6 10V2M2.5 5.5L6 2l3.5 3.5" />
           </svg>

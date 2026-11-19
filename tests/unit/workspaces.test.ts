@@ -41,7 +41,7 @@ describe('workspaces on the board', () => {
     const stacked = addSquad(two, created(3), 0, 'w1')
     expect(stacked.find((n) => n.id === 'q3')!.position.y).toBeGreaterThan(stacked.find((n) => n.id === 'q1')!.position.y)
     const all = [1, 2, 3].flatMap((k) => created(k).edges)
-    const flags = { flowsPaused: false, firing: {}, lit: {} }
+    const flags = { flowsPaused: false, paused: false, firing: {}, lit: {}, tasks: {} }
     expect(flowEdges(inWorkspace(stacked, 'w1'), all, flags)).toHaveLength(8)
     expect(flowEdges(inWorkspace(stacked, 'w2'), all, flags)).toHaveLength(4)
     expect(flowEdges(inWorkspace(stacked, 'w2'), all, flags).every((e) => String(e.target) === 'q2')).toBe(true)

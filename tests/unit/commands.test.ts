@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { AgentError } from '../../src/main/domain/agent'
-import { routeCommand, sendCommand, type CommandAgent, type CommandState } from '../../src/main/application/commands'
+import { previewCommand, routeCommand, sendCommand, type CommandAgent, type CommandState } from '../../src/main/application/commands'
 import { isMicrophoneAllowed } from '../../src/main/security'
 import { channels } from '../../src/shared/ipc/channels'
 
@@ -152,6 +152,61 @@ describe('sendCommand', () => {
     const r = await sendCommand({ state: () => st, paused: () => false, submit }, 1, global, '@Nobody x')
     expect(submit).not.toHaveBeenCalled()
     expect(r.delivered).toEqual([])
+  })
+})
+
+describe('planCommand and previewCommand', () => {
+  const only = (ids: string[]): CommandState => ({ ...st, agents: st.agents.filter((a) => ids.includes(a.id) || a.workspaceId !== W), squads: st.squads.filter((s) => ids.includes(s.orchestratorId)) })
+  const view = (state: CommandState, paused = false) => ({ state: () => state, paused: () => paused })
+  const names = (r: { targets: { name: string }[] }) => r.targets.map((t) => t.name)
+
+  it('@agent and @group give their targets, a group also its name', () => {
+    expect(names(previewCommand(view(st), 1, global, '@zoe hi'))).toEqual(['Zoe'])
+    expect(previewCommand(view(st), 1, global, '@zoe hi').group).toBeUndefined()
+    const g = previewCommand(view(st), 1, { workspaceId: W, squadId: 's1' }, '@Frontend go')
+    expect(names(g)).toEqual(['Zoe', 'Leo'])
+    expect(g.group).toBe('Frontend')
+  })
+  it('without @: every Orchestrator, one, or the only agent; with none and several agents it is refused', () => {
+    expect(names(previewCommand(view(st), 1, global, 'plan'))).toEqual(['Orchestrator', 'Orchestrator'])
+    expect(names(previewCommand(view(only(['o1'])), 1, global, 'plan'))).toEqual(['Orchestrator'])
+    expect(names(previewCommand(view(only(['zoe', 'leo'])), 1, global, 'plan'))).toEqual([])
+    expect(previewCommand(view(only(['zoe', 'leo'])), 1, global, 'plan').refused[0]?.reason).toContain('@name')
+    const lone: CommandState = { agents: [ag('ann', 'Ann', 'backend')], groups: [], squads: [] }
+    expect(names(previewCommand(view(lone), 1, global, 'plan'))).toEqual(['Ann'])
+  })
+  it('an unknown name is refused', () => {
+    const p = previewCommand(view(st), 1, global, '@Nobody x')
+    expect(p.targets).toEqual([])
+    expect(p.refused[0]).toMatchObject({ name: '@Nobody' })
+  })
+  it('an agent that is starting or waiting is refused; Pause all refuses everyone', () => {
+    const s2: CommandState = { ...st, agents: st.agents.map((a) => (a.id === 'leo' ? { ...a, state: 'waiting' } : a.id === 'zoe' ? { ...a, state: 'starting' } : a)) }
+    const p = previewCommand(view(s2), 1, { workspaceId: W, squadId: 's1' }, '@Frontend go')
+    expect(p.targets).toEqual([])
+    expect(p.refused.map((r) => r.name)).toEqual(['Zoe', 'Leo'])
+    expect(p.group).toBeUndefined()
+    const q = previewCommand(view(st, true), 1, global, '@Zoe x')
+    expect(q.targets).toEqual([])
+    expect(q.refused).toEqual([{ name: 'Zoe', reason: 'is paused' }])
+  })
+  it('the preview and the send agree on who is reached, and the preview never submits', async () => {
+    const submit = vi.fn(async () => undefined)
+    const s2: CommandState = { ...st, agents: st.agents.map((a) => (a.id === 'leo' ? { ...a, state: 'waiting' } : a)) }
+    const d = { state: () => s2, paused: () => false, submit }
+    const scope = { workspaceId: W, squadId: 's1' }
+    const p = previewCommand(d, 1, scope, '@Frontend go')
+    expect(submit).not.toHaveBeenCalled()
+    const r = await sendCommand(d, 1, scope, '@Frontend go')
+    expect(names(p)).toEqual(r.delivered)
+    expect(p.refused).toEqual(r.refused)
+  })
+  it('command:preview shares the send input schema and bounds its answer', () => {
+    const id = '3b1b7b7e-2d55-4b7f-9a0e-1c2d3e4f5a6b'
+    const c = channels['command:preview']
+    expect(c.in.safeParse({ text: 'hi', workspaceId: id }).success).toBe(true)
+    expect(c.in.safeParse({ text: 'x'.repeat(20_001), workspaceId: id }).success).toBe(false)
+    expect(c.out.safeParse({ targets: Array.from({ length: 41 }, () => ({ name: 'a' })), refused: [] }).success).toBe(false)
   })
 })
 

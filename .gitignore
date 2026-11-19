@@ -7,3 +7,7 @@ playwright-report/
 coverage/
 *.log
 docs/ref/
+tests/perf/out/
+tests/fixtures/voice/*.wav
+tests/fixtures/voice/.cache/
+tests/ui/out/

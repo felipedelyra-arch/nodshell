@@ -28,9 +28,10 @@ export function ConnectMenu({ source, workspaceId, autoFocus }: { source: Source
       <button
         type="button"
         className="btn-quiet"
-        disabled={!chosen || busy}
+        aria-busy={busy || undefined}
+        disabled={!chosen}
         onClick={async () => {
-          if (!chosen) return
+          if (!chosen || busy) return
           setBusy(true)
           await connect(source, chosen.target)
           setBusy(false)

@@ -2,7 +2,7 @@ import { readFileSync, statSync } from 'node:fs'
 import { connect } from 'node:net'
 import { join } from 'node:path'
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { cleanupTemp, expectGone, launch, newConsole, typeIn } from './helpers'
+import { cleanupTemp, expectGone, launch, newConsole, typeIn, typeInCard, zoomInPast } from './helpers'
 import { END, openRepo, setupRepo, spawnPreset, START, submissions } from './repo'
 
 test.afterEach(cleanupTemp)
@@ -10,6 +10,14 @@ test.afterEach(cleanupTemp)
 const box = async (l: Locator) => (await l.boundingBox())!
 const card = (page: Page, name: string) => page.locator(`[data-testid=agent-node][data-name="${name}"]`)
 const edges = (page: Page) => page.locator('.react-flow__edge-flow')
+/** Back to the whole squad after zoomInPast: every edge in view again. */
+const fitAll = (page: Page) => page.getByRole('toolbar', { name: 'Board tools' }).getByRole('button', { name: 'Fit to content' }).click()
+/** The moving dots of every edge: how many animations, and their distinct states ("running@1", "paused@3"). */
+const runners = (page: Page) =>
+  page.locator('[data-testid=flow-runners] .flow-runner').evaluateAll((els) => {
+    const all = els.flatMap((e) => e.getAnimations())
+    return { count: all.length, states: [...new Set(all.map((a) => `${a.playState}@${a.playbackRate}`))].sort() }
+  })
 
 async function clean(page: Page, errors: string[]): Promise<void> {
   expect(await page.evaluate(() => (window as unknown as { __csp: string[] }).__csp)).toEqual([])
@@ -27,9 +35,7 @@ const namesOf = (page: Page, role: string) =>
 
 /** Types a prompt into the agent's terminal, as the user would. */
 async function prompt(page: Page, name: string, text: string): Promise<void> {
-  await card(page, name).getByTestId('terminal-body').click()
-  await page.keyboard.type(text)
-  await page.keyboard.press('Enter')
+  await typeInCard(page, card(page, name), text)
 }
 
 const procState = (pid: number) => {
@@ -57,11 +63,31 @@ test('squad edges are real: a member\'s reply reaches the Orchestrator and the e
     expect(new Set(configs).size).toBe(9)
     for (const c of configs) expect(c.includes(r.repo) || c.includes('worktrees')).toBe(false)
 
-    // a frontend member ends a turn: its reply goes through the FRONTEND edge into the Orchestrator, and the edge runs meanwhile
+    // idle: three dots run slowly along each edge, its own way; the dot-button says so in words
+    await expect.poll(() => runners(page)).toEqual({ count: 12, states: ['running@1'] })
+    await expect(page.locator('[data-testid=flow-edge][data-direction=forward][data-speed=slow][data-tone=normal]')).toHaveCount(4)
+    await expect(page.getByRole('button', { name: 'Edge FRONTEND to Orchestrator, resting', exact: true })).toBeVisible()
+    await page.screenshot({ path: test.info().outputPath('edges-normal.png') })
+    // nobody looking: a blurred window stops every dot, focus brings them back
+    await page.evaluate(() => window.dispatchEvent(new Event('blur')))
+    await expect.poll(() => runners(page)).toEqual({ count: 12, states: ['paused@1'] })
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+    await expect.poll(() => runners(page)).toEqual({ count: 12, states: ['running@1'] })
+    // reduced motion: no dots at all, the state stays in the words
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    await expect.poll(() => runners(page)).toEqual({ count: 0, states: [] })
+    await expect(page.getByTestId('flow-runners').first()).toBeHidden()
+    await expect(page.getByRole('button', { name: 'Edge FRONTEND to Orchestrator, resting', exact: true })).toBeVisible()
+    await page.emulateMedia({ reducedMotion: 'no-preference' })
+    await expect.poll(() => runners(page)).toEqual({ count: 12, states: ['running@1'] })
+
+    // a frontend member ends a turn: its reply goes through the FRONTEND edge into the Orchestrator, its dots run that way, fast
     const lead = r.runs().find((x) => x.cwd.endsWith('orchestrator-1'))!
     const fe = await namesOf(page, 'frontend')
+    await zoomInPast(page) // a fitted squad shows summaries; typing needs the terminal
     await prompt(page, fe[0]!, 'build the page')
-    await expect(page.locator('[data-testid=flow-edge][data-state=firing]')).toHaveCount(1, { timeout: 10_000 })
+    await expect(page.locator('[data-testid=flow-edge][data-state=firing][data-direction=toOrchestrator][data-speed=fast]')).toHaveCount(1, { timeout: 10_000 })
+    await expect(page.getByRole('button', { name: 'Edge FRONTEND to Orchestrator, passing a reply, running', exact: true })).toBeVisible()
     await page.screenshot({ path: test.info().outputPath('f5.png') })
     await expect.poll(() => submissions(r.logs, lead.pid), { timeout: 10_000 }).toEqual([`${START}From ${fe[0]} (frontend):\nFINAL ANSWER to build the page${END}`])
     await expect(page.locator('[data-testid=flow-edge][data-state=firing]')).toHaveCount(0, { timeout: 5000 })
@@ -101,10 +127,12 @@ test('squad edges are real: a member\'s reply reaches the Orchestrator and the e
     expect(submissions(r.logs, lead.pid)).toHaveLength(1)
     await prompt(page, fe[1]!, 'REPLY:the answer is 42')
     await expect.poll(() => submissions(r.logs, lead.pid).at(-1), { timeout: 10_000 }).toBe(`${START}FE ${fe[1]} says the answer is 42${END}`)
+    await fitAll(page)
 
     // Connect re-creates a removed squad edge and lights all four; with nothing missing it only lights them
     await page.getByRole('button', { name: 'Edge TESTERS to Orchestrator' }).click()
     await page.getByRole('dialog', { name: 'Edge TESTERS to Orchestrator' }).getByRole('button', { name: 'Remove' }).click()
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Remove' }).click() // it asks first
     await expect(edges(page)).toHaveCount(3)
     const connectBtn = page.getByTestId('orchestrator-node').getByRole('button', { name: 'Connect' })
     await connectBtn.click()
@@ -115,6 +143,25 @@ test('squad edges are real: a member\'s reply reaches the Orchestrator and the e
     await connectBtn.click()
     await expect(page.locator('[data-testid=flow-edge][data-lit]')).toHaveCount(4)
     await expect(edges(page)).toHaveCount(4)
+
+    // Pause all: every dot stands still, dimmed, and every edge says paused; Resume all sets them going again
+    await page.getByRole('button', { name: 'Pause all', exact: true }).click()
+    await expect(page.locator('[data-testid=flow-edge][data-tone=paused][data-speed=stopped]')).toHaveCount(4)
+    await expect(page.getByRole('button', { name: /^Edge \w+ to Orchestrator, paused$/ })).toHaveCount(4)
+    await expect.poll(() => runners(page)).toMatchObject({ count: 12, states: [expect.stringMatching(/^paused@/)] })
+    await page.screenshot({ path: test.info().outputPath('edges-paused.png') })
+    await page.getByRole('button', { name: 'Resume all', exact: true }).click()
+    await expect.poll(() => runners(page)).toEqual({ count: 12, states: ['running@1'] })
+
+    // a member in error (its process crashed): its group's edge turns to the error tone and says so
+    await zoomInPast(page)
+    await prompt(page, fe[1]!, 'EXITFAIL')
+    await expect(card(page, fe[1]!)).toHaveAttribute('data-state', 'error', { timeout: 10_000 })
+    await fitAll(page)
+    await expect(page.locator('[data-testid=flow-edge][data-tone=error]')).toHaveCount(1)
+    await expect(page.getByRole('button', { name: 'Edge FRONTEND to Orchestrator, error, resting', exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Edge BACKEND to Orchestrator, resting', exact: true })).toBeVisible()
+    await page.screenshot({ path: test.info().outputPath('edges-error.png') })
     await clean(page, errors)
   } finally {
     await app.close()

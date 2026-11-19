@@ -10,7 +10,8 @@ import { useCanvas } from '../store'
 import { WebTilePopover } from '../webtile/WebTilePopover'
 import { WEBTILES_MAX } from '../../shared/webtile'
 
-const COLOR_NAMES: Record<string, string> = { '#ff6a2b': 'Orange', '#ffd23d': 'Yellow', '#3ddc84': 'Green', '#4cc9f0': 'Cyan', '#a78bfa': 'Violet', '#ff6b9d': 'Pink', '#e4e4e7': 'Light gray', '#ff4d4f': 'Red' }
+// in the order of ANNOTATION_COLORS
+const COLOR_NAMES = ['Orange', 'Yellow', 'Green', 'Cyan', 'Violet', 'Pink', 'Light gray', 'Red']
 /** margins the board keeps free around what Expand fits: top bar, bottom bars, this toolbar */
 export const FIT_PADDING = { top: '56px', bottom: '140px', left: '76px', right: '24px' } as const
 
@@ -84,7 +85,13 @@ const ToolButton = forwardRef<HTMLButtonElement, ToolButtonProps>(function ToolB
         aria-describedby={tipId}
         data-tip={text}
         tabIndex={stop === idx ? 0 : -1}
-        onClick={(e) => !off && onClick(e)}
+        onClick={(e) => {
+          if (off) return
+          e.currentTarget.setAttribute('data-tip-off', '') // the tip was read: it comes back at the next visit
+          onClick(e)
+        }}
+        onPointerLeave={(e) => e.currentTarget.removeAttribute('data-tip-off')}
+        onBlur={(e) => e.currentTarget.removeAttribute('data-tip-off')}
       >
         <svg {...ico}>{children}</svg>
       </button>
@@ -120,13 +127,13 @@ function ColorMenu({ onClose, anchor }: { onClose: () => void; anchor: React.Ref
         }
       }}
     >
-      {ANNOTATION_COLORS.map((c) => (
+      {ANNOTATION_COLORS.map((c, i) => (
         <button
           key={c}
           type="button"
           className="color-swatch"
           style={{ background: c }}
-          aria-label={COLOR_NAMES[c] ?? c}
+          aria-label={COLOR_NAMES[i] ?? c}
           aria-pressed={color === c}
           onClick={() => {
             useAnnotations.getState().setColor(c)

@@ -29,7 +29,7 @@ export const submissions = (logs: string, pid: number): string[] => {
  * prompt runs the stdio server of its --mcp-config (initialize, notifications/initialized, tools/call), logs the reply to <pid>.mcp
  * and shows "MCP RESULT <text>" before answering. "GOAL:<text>" plays an Orchestrator: list_agents, then one send_message
  * "<text> part <i>" to each of the first two other non-Orchestrator agents (each reply logged and shown the same way).
- * "SLOW" makes the turn last about 4 s longer.
+ * "SLOW" makes the turn last about 4 s longer. "EXITNOW" ends the process cleanly mid-turn, "EXITFAIL" with code 3 (a crash).
  */
 export function fakeClaude(logs: string): string {
   return `#!${process.execPath}
@@ -95,6 +95,7 @@ async function turn(prompt) {
     await sleep(600)
   }
   if (prompt.includes('EXITNOW')) process.exit(0)
+  if (prompt.includes('EXITFAIL')) process.exit(3)
   const call = /MCPCALL (\\w+) (\\{.*\\})/.exec(prompt)
   if (call) {
     const r = await mcpCall(call[1], JSON.parse(call[2]))

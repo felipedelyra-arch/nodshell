@@ -1,12 +1,14 @@
 import { PCM_MAX_BYTES, SAMPLE_RATE } from '../../shared/voice'
+import { blockRms, smoothLevel } from './hints'
 
-export type Recorder = { stop(): Promise<Uint8Array<ArrayBuffer>> }
+export type Recorder = { finish(): Promise<Uint8Array<ArrayBuffer>>; abort(): void; /** smoothed input level, 0..1 */ level(): number }
+const DRAIN_TIMEOUT_MS = 250
 
 /**
- * Opens the microphone and collects 16 kHz mono 16-bit PCM in memory only. Call it from a user gesture; `stop()` always ends the
- * tracks. At the 60 s limit it calls `onLimit` (the caller then stops and transcribes what there is).
+ * Opens the microphone and collects 16 kHz mono 16-bit PCM in memory only. Call it from a user gesture. `finish()` drains the worklet
+ * and returns the audio; `abort()` drops it; both end the tracks. At the 60 s limit it calls `onLimit`; if the device goes away, `onLost`.
  */
-export async function startRecorder(onLimit: () => void): Promise<Recorder> {
+export async function startRecorder(onLimit: () => void, onLost: () => void): Promise<Recorder> {
   const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } })
   let ctx: AudioContext | undefined
   try {
@@ -17,7 +19,11 @@ export async function startRecorder(onLimit: () => void): Promise<Recorder> {
     const pcm = new Uint8Array(PCM_MAX_BYTES)
     const view = new DataView(pcm.buffer)
     let bytes = 0
-    node.port.onmessage = (e: MessageEvent<Float32Array>) => {
+    let drained: (() => void) | undefined
+    let lvl = 0
+    node.port.onmessage = (e: MessageEvent<Float32Array | 'done'>) => {
+      if (e.data === 'done') return drained?.()
+      lvl = smoothLevel(lvl, blockRms(e.data))
       for (const f of e.data) {
         if (bytes >= PCM_MAX_BYTES) return
         view.setInt16(bytes, Math.round(Math.max(-1, Math.min(1, f)) * 32767), true)
@@ -26,13 +32,27 @@ export async function startRecorder(onLimit: () => void): Promise<Recorder> {
       if (bytes >= PCM_MAX_BYTES) onLimit()
     }
     source.connect(node)
+    const track = stream.getAudioTracks()[0]
+    if (track) track.onended = onLost
     const audio = ctx
+    const close = async () => {
+      if (track) track.onended = null
+      node.port.onmessage = null
+      source.disconnect()
+      stream.getTracks().forEach((t) => t.stop())
+      await audio.close().catch(() => undefined)
+    }
     return {
-      stop: async () => {
-        node.port.onmessage = null
-        source.disconnect()
-        stream.getTracks().forEach((t) => t.stop())
-        await audio.close().catch(() => undefined)
+      level: () => lvl,
+      abort: () => void close(),
+      finish: async () => {
+        // blocks still in transit arrive before the worklet's marker; the timeout covers a dead worklet
+        await new Promise<void>((done) => {
+          drained = done
+          setTimeout(done, DRAIN_TIMEOUT_MS)
+          node.port.postMessage('flush')
+        })
+        await close()
         return pcm.slice(0, bytes)
       },
     }

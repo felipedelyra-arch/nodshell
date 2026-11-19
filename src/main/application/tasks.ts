@@ -3,8 +3,8 @@ import { isFinished, taskStatus, taskTitle, type Assignee, type RecipientState, 
 
 /** What the delivery queue did with a task's message for one recipient. */
 export type DeliveryEvent = 'queued' | 'delivered' | 'returned' | 'dropped'
-/** Only titles and states: a message's full text never leaves the board. */
-export type TaskSummary = { squadId: string; done: number; total: number; recent: { title: string; assignee: string; status: TaskStatus }[] }
+/** Only titles and states: a message's full text never leaves the board. `latest`: per assignee id (agent or group), the state of its latest task (the board's edges show it). */
+export type TaskSummary = { squadId: string; done: number; total: number; recent: { title: string; assignee: string; status: TaskStatus }[]; latest: { id: string; status: TaskStatus }[] }
 
 const NEXT: Record<DeliveryEvent, RecipientState> = { queued: 'queued', delivered: 'running', returned: 'queued', dropped: 'failed' }
 
@@ -78,7 +78,8 @@ export class TaskBoard {
   summary(squadId: string): TaskSummary {
     const mine = this.list(squadId)
     const recent = mine.slice(-TASKS_RECENT).reverse().map((t) => ({ title: t.title, assignee: t.assignee.name, status: t.status }))
-    return { squadId, done: mine.filter((t) => t.status === 'done').length, total: mine.length, recent }
+    const latest = new Map(mine.map((t) => [t.assignee.id, t.status])) // in creation order: the last one wins
+    return { squadId, done: mine.filter((t) => t.status === 'done').length, total: mine.length, recent, latest: [...latest].map(([id, status]) => ({ id, status })) }
   }
 
   private set(t: Task, agentId: string, r: RecipientState): void {

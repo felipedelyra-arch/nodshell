@@ -499,7 +499,7 @@ test('holding Space with the pen active records for the command bar and draws no
     await tool(page, 'Pen').click()
     await page.mouse.move(idleSpot.x, idleSpot.y)
     await page.keyboard.down('Space')
-    await expect(field).toHaveAttribute('placeholder', 'Listening…')
+    await expect(field).toHaveAttribute('placeholder', 'Speak now…')
     await page.mouse.move(idleSpot.x + 100, idleSpot.y + 40, { steps: 5 }) // moving with the key held is not drawing
     await page.waitForTimeout(1500)
     await page.keyboard.up('Space')

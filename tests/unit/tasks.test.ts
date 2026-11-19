@@ -55,19 +55,21 @@ describe('TaskBoard', () => {
     const { b, last } = board()
     const t = b.create(1, 'q1', 'Build it\ndetails', zoe, ['zoe'])
     expect(t).toMatchObject({ id: 't1', squadId: 'q1', title: 'Build it', assignee: zoe, status: 'queued', createdAt: 1000 })
-    expect(last()).toEqual({ squadId: 'q1', done: 0, total: 1, recent: [{ title: 'Build it', assignee: 'Zoe', status: 'queued' }] })
+    expect(last()).toEqual({ squadId: 'q1', done: 0, total: 1, recent: [{ title: 'Build it', assignee: 'Zoe', status: 'queued' }], latest: [{ id: 'zoe', status: 'queued' }] })
     b.track('zoe', ['t1'], 'queued')
     b.settle('t1')
     b.stopped('zoe') // a turn that ended before the delivery does not count
     expect(t.status).toBe('queued')
     b.track('zoe', ['t1'], 'delivered')
-    expect(last()).toMatchObject({ done: 0, total: 1, recent: [{ status: 'running' }] })
+    expect(last()).toMatchObject({ done: 0, total: 1, recent: [{ status: 'running' }], latest: [{ id: 'zoe', status: 'running' }] })
     b.stopped('zoe')
     expect(last()).toMatchObject({ done: 1, total: 1, recent: [{ status: 'done' }] })
     b.down('zoe') // finished stays finished
     expect(t.status).toBe('done')
-    const out = { ...last()!, squadId: '3f2b8c1e-8a4d-4f6e-9b1a-2c7d5e9f0a11' }
+    const uuid = '3f2b8c1e-8a4d-4f6e-9b1a-2c7d5e9f0a11'
+    const out = { ...last()!, squadId: uuid, latest: last()!.latest.map((l) => ({ ...l, id: uuid })) }
     expect(events['tasks:changed'].parse(out)).toEqual(out) // what main sends passes the event schema
+    expect(() => events['tasks:changed'].parse({ ...out, latest: [{ id: 'zoe', status: 'done' }] })).toThrow() // ids only, never a name
   })
 
   it('a group: running from the first delivery, done when every member that got it has finished', () => {
@@ -142,13 +144,24 @@ describe('TaskBoard', () => {
     expect(s.recent[0]!.title).toBe('and another')
   })
 
+  it('latest: per assignee, the state of its newest task (agent or group)', () => {
+    const { b, last } = board()
+    b.create(1, 'q1', 'a', zoe, ['zoe'])
+    b.create(1, 'q1', 'b', fe, ['zoe', 'pip'])
+    b.track('zoe', ['t1'], 'delivered')
+    b.down('zoe')
+    expect(last()!.latest).toEqual([{ id: 'zoe', status: 'failed' }, { id: 'gf', status: 'running' }])
+    b.create(1, 'q1', 'c', zoe, ['zoe'])
+    expect(last()!.latest).toContainEqual({ id: 'zoe', status: 'queued' }) // a newer task replaces the failed one
+  })
+
   it('tasks go with their squad or their window', () => {
     const { b } = board()
     b.create(1, 'q1', 'a', zoe, ['zoe'])
     b.create(1, 'q2', 'b', zoe, ['pip'])
     b.create(2, 'q3', 'c', zoe, ['leo'])
     b.dropSquad('q1')
-    expect(b.summary('q1')).toEqual({ squadId: 'q1', done: 0, total: 0, recent: [] })
+    expect(b.summary('q1')).toEqual({ squadId: 'q1', done: 0, total: 0, recent: [], latest: [] })
     b.dropOwner(1)
     expect(b.list('q2')).toEqual([])
     expect(b.list('q3')).toHaveLength(1)

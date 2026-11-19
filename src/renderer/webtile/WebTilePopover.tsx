@@ -70,8 +70,8 @@ export function WebTilePopover({ onClose, anchor }: { onClose: () => void; ancho
         <button type="button" className="btn-quiet" onClick={onClose}>
           Cancel
         </button>
-        <button type="submit" className="btn-accent" disabled={busy || address.trim() === ''}>
-          {busy ? 'Opening…' : 'Open'}
+        <button type="submit" className="btn-accent" aria-busy={busy || undefined} disabled={address.trim() === ''}>
+          Open
         </button>
       </div>
     </form>

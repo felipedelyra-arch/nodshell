@@ -3,6 +3,7 @@ import { MODEL_CHOICES, PROMPT_MAX, SQUAD_GROUP_SIZE, SQUAD_ROLES, type ModelCho
 import { PRESET_NAME_MAX, validatePreset, type PresetErrors, type PresetFields } from '../../shared/preset'
 import { useCanvas } from '../store'
 import { usePresets, type PresetDto } from './store'
+import { ConfirmRow } from '../chrome/ConfirmRow'
 
 const EMPTY: PresetFields = { name: '', role: '', model: null, systemPrompt: '' }
 const FOCUSABLE = 'button:not([disabled]), input, select, textarea, [href], [tabindex]:not([tabindex="-1"])'
@@ -173,7 +174,7 @@ export function PresetsDialog({ onClose }: { onClose: () => void }) {
           </section>
           </div>
           <form
-            className="flex min-h-0 flex-col overflow-auto pr-1"
+            className="flex min-h-0 flex-col overflow-auto px-1 pb-2"
             noValidate
             aria-label={current ? `Edit ${current.name}` : 'New preset'}
             onSubmit={(e) => {
@@ -249,23 +250,17 @@ export function PresetsDialog({ onClose }: { onClose: () => void }) {
             )}
             <div className="mt-3 flex items-center justify-end gap-2">
               {current && !current.builtin && !confirming && (
-                <button ref={deleteBtn} type="button" className="btn-quiet mr-auto" onClick={() => setConfirming(true)}>
+                <button ref={deleteBtn} type="button" className="btn-danger mr-auto" onClick={() => setConfirming(true)}>
                   Delete
                 </button>
               )}
               {confirming && current && (
-                <div className="mr-auto flex items-center gap-2" role="group" aria-label="Confirm delete">
-                  <span className="text-[11px] text-text">Delete “{current.name}”?</span>
-                  <button type="button" className="btn-quiet" autoFocus onClick={cancelConfirm}>
-                    Keep
-                  </button>
-                  <button type="button" className="btn-danger" onClick={() => void onDelete()}>
-                    Confirm delete
-                  </button>
-                </div>
+                <ConfirmRow className="mr-auto" label="Delete preset" confirm="Delete" onKeep={cancelConfirm} onConfirm={() => void onDelete()}>
+                  Delete “{current.name}”? Its role, model and system prompt are lost.
+                </ConfirmRow>
               )}
-              <button type="submit" className="btn-accent" disabled={busy}>
-                {busy ? 'Saving…' : 'Save'}
+              <button type="submit" className="btn-accent" aria-busy={busy || undefined}>
+                Save
               </button>
             </div>
           </form>

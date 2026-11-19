@@ -31,18 +31,19 @@ export function signal(pid: number, sig: NodeJS.Signals, group = false): void {
 
 const PAGE = 4096 // Linux page size on every target we ship (x86-64, arm64 4K); only feeds a display figure
 
-/** Resident bytes of all processes whose session id is in `sids`, in one pass over /proc (stat field 24 is the RSS in pages). Best effort: 0 without /proc. */
-export function sessionRss(sids: number[]): number {
-  if (sids.length === 0) return 0
+/** Resident bytes per session id in `sids`, in one pass over /proc (stat field 24 is the RSS in pages). Best effort: empty without /proc. */
+export function sessionRssBy(sids: number[]): Map<number, number> {
+  const out = new Map<number, number>()
+  if (sids.length === 0) return out
   const want = new Set(sids)
-  let pages = 0
   try {
     for (const name of readdirSync('/proc')) {
       if (!/^\d+$/.test(name)) continue
       try {
         const stat = readFileSync(`/proc/${name}/stat`, 'utf8')
         const rest = stat.slice(stat.lastIndexOf(')') + 2).split(' ')
-        if (want.has(Number(rest[3]))) pages += Number(rest[21]) || 0
+        const sid = Number(rest[3])
+        if (want.has(sid)) out.set(sid, (out.get(sid) ?? 0) + (Number(rest[21]) || 0) * PAGE)
       } catch {
         // process vanished
       }
@@ -50,7 +51,17 @@ export function sessionRss(sids: number[]): number {
   } catch {
     // no /proc
   }
-  return pages * PAGE
+  return out
+}
+
+/** Total physical memory (MemTotal), or null where /proc/meminfo does not say. */
+export function totalBytes(): number | null {
+  try {
+    const kb = /^MemTotal:\s+(\d+) kB$/m.exec(readFileSync('/proc/meminfo', 'utf8'))?.[1]
+    return kb ? Number(kb) * 1024 : null
+  } catch {
+    return null
+  }
 }
 
 /** Memory the system can still hand out without swapping (MemAvailable), or null where /proc/meminfo does not say. */

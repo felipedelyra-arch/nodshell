@@ -1,6 +1,7 @@
-import { NodeResizer, useStoreApi, type NodeProps } from '@xyflow/react'
-import { memo, useEffect, useId, useRef, useState } from 'react'
-import { ADDRESS_MAX } from '../../shared/webtile'
+import { NodeResizer, useStore, useStoreApi, type NodeProps } from '@xyflow/react'
+import { memo, useEffect, useId, useRef, useState, type CSSProperties } from 'react'
+import { shallow } from 'zustand/shallow'
+import { ADDRESS_MAX, type PageWidth } from '../../shared/webtile'
 import { useAnnotations } from '../annotations/store'
 import { TILE_MIN, type AppNode, type WebTileFlowNode } from '../graph'
 import { useCanvas } from '../store'
@@ -11,6 +12,7 @@ import { freeArea, overlaps, tileVisible, type Rect } from './visibility'
 const OVERLAY = '[role=dialog], [role=menu], [role=listbox], dialog[open], [aria-modal=true]'
 /** a left-toolbar tip shows to the right of the toolbar, this far into the board */
 const TOOLBAR_TIP_REACH = 340
+const NOWHERE: Rect = { x: 0, y: 0, width: 0, height: 0 }
 
 const icon = { width: 14, height: 14, viewBox: '0 0 12 12', fill: 'none', stroke: 'currentColor', strokeWidth: 1.3, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true } as const
 const sizeOf = (n: AppNode) => ({ w: Number(n.style?.width ?? n.width ?? n.measured?.width ?? 0), h: Number(n.style?.height ?? n.height ?? n.measured?.height ?? 0) })
@@ -24,8 +26,9 @@ function overlapped(nodes: AppNode[], id: string): boolean {
 }
 
 /**
- * Keeps main told, at most once per frame and with one request in flight per tile, where the body is in the window, the board zoom
- * and whether the native page may show (see tileVisible). Returns whether it is shown now (else the static mirror shows).
+ * Keeps main told, at most once per frame and with one request in flight per tile, where the body and the board's free area are in
+ * the window, the board zoom and whether the native page may show (see tileVisible; main draws only the part inside the free area).
+ * Returns whether it is shown now (else the static mirror shows).
  */
 function usePlacement(id: string, body: React.RefObject<HTMLDivElement | null>, resizing: React.RefObject<boolean>): boolean {
   const flow = useStoreApi()
@@ -34,7 +37,7 @@ function usePlacement(id: string, body: React.RefObject<HTMLDivElement | null>, 
     let raf = 0
     let last = ''
     let busy = false
-    let pending: { id: string; x: number; y: number; width: number; height: number; zoom: number; visible: boolean } | null = null
+    let pending: { id: string; x: number; y: number; width: number; height: number; free: Rect; zoom: number; visible: boolean; pageWidth: PageWidth | null } | null = null
     const flush = () => {
       if (busy || !pending) return
       const p = pending
@@ -58,7 +61,7 @@ function usePlacement(id: string, body: React.RefObject<HTMLDivElement | null>, 
         // another board is in view: hidden once, then nothing is measured until it comes back
         if (last === 'away') return
         last = 'away'
-        pending = { id, x: 0, y: 0, width: 0, height: 0, zoom: 1, visible: false }
+        pending = { id, ...NOWHERE, free: NOWHERE, zoom: 1, visible: false, pageWidth: me?.type === 'webtile' ? (me.data.pageWidth ?? null) : null }
         setShown(false)
         return flush()
       }
@@ -67,16 +70,18 @@ function usePlacement(id: string, body: React.RefObject<HTMLDivElement | null>, 
       const free = freeArea({ width: window.innerWidth, height: window.innerHeight }, { ...MAX_MARGIN, bottom: Math.max(MAX_MARGIN.bottom, window.innerHeight - bottomChrome + 8) })
       const tip = r.left < TOOLBAR_TIP_REACH && document.querySelector('.board-toolbar .tool-btn:hover, .board-toolbar .tool-btn:focus-visible') !== null
       const fs = flow.getState()
+      const mine = me.type === 'webtile' ? (me.data.pageWidth ?? null) : null
+      const big = s.maximized === id
       const visible = tileVisible({ x: r.left, y: r.top, width: r.width, height: r.height }, free, {
         activeWorkspace: true,
         overlay: tip || document.querySelector(OVERLAY) !== null,
-        maximized: s.maximized !== null,
+        maximized: s.maximized !== null && !big, // a maximized tile is the one page that shows
         moving: resizing.current || fs.userSelectionActive || s.nodes.some((n) => n.dragging || n.resizing),
         selectTool: useAnnotations.getState().tool === 'select',
-        overlapped: overlapped(s.nodes, id),
+        overlapped: !big && overlapped(s.nodes, id),
       })
-      const p = { id, x: r.left, y: r.top, width: r.width, height: r.height, zoom: Math.min(4, Math.max(0.05, fs.transform[2])), visible }
-      const key = `${p.x}|${p.y}|${p.width}|${p.height}|${p.zoom}|${p.visible}`
+      const p = { id, x: r.left, y: r.top, width: r.width, height: r.height, free, zoom: big ? 1 : Math.min(4, Math.max(0.05, fs.transform[2])), visible, pageWidth: mine } // maximized: the page is at zoom 1 on the screen
+      const key = `${p.x}|${p.y}|${p.width}|${p.height}|${free.x}|${free.y}|${free.width}|${free.height}|${p.zoom}|${p.visible}|${mine}`
       if (key === last) return
       last = key
       pending = p
@@ -86,39 +91,132 @@ function usePlacement(id: string, body: React.RefObject<HTMLDivElement | null>, 
     raf = requestAnimationFrame(tick)
     return () => {
       cancelAnimationFrame(raf)
-      void window.api.invoke('webtile:place', { id, x: 0, y: 0, width: 0, height: 0, zoom: 1, visible: false }).catch(() => undefined) // gone from the board: hidden at once
+      void window.api.invoke('webtile:place', { id, ...NOWHERE, free: NOWHERE, zoom: 1, visible: false, pageWidth: null }).catch(() => undefined) // gone from the board: hidden at once
     }
   }, [id, body, resizing, flow])
   return shown
 }
 
+const VIEWPORTS: { width: PageWidth | null; label: string; text: string }[] = [
+  { width: 390, label: 'Mobile', text: '390' },
+  { width: 768, label: 'Tablet', text: '768' },
+  { width: 1440, label: 'Desktop', text: '1440' },
+  { width: null, label: 'Fit', text: 'Fit' },
+]
+
+/** The viewport preset menu of a tile: the page lays out at this width whatever the tile's size (main applies it). */
+function ViewportMenu({ id, value }: { id: string; value: PageWidth | null }) {
+  const [open, setOpen] = useState(false)
+  const btn = useRef<HTMLButtonElement>(null)
+  const menu = useRef<HTMLDivElement>(null)
+  const items = () => [...(menu.current?.querySelectorAll<HTMLElement>('[role^="menuitem"]') ?? [])]
+  useEffect(() => {
+    if (!open) return
+    items()[Math.max(0, VIEWPORTS.findIndex((v) => v.width === value))]?.focus()
+    const outside = (e: MouseEvent) => {
+      if (!menu.current?.contains(e.target as Node) && !btn.current?.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', outside)
+    return () => document.removeEventListener('mousedown', outside)
+  }, [open])
+  const close = () => {
+    setOpen(false)
+    btn.current?.focus()
+  }
+  const onKey = (e: React.KeyboardEvent) => {
+    const all = items()
+    const i = all.indexOf(document.activeElement as HTMLElement)
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      e.nativeEvent.stopImmediatePropagation() // closes the menu, not the focus mode
+      close()
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault()
+      all[(i + (e.key === 'ArrowDown' ? 1 : -1) + all.length) % all.length]?.focus()
+    } else if (e.key === 'Tab') setOpen(false)
+  }
+  const current = VIEWPORTS.find((v) => v.width === value) ?? VIEWPORTS[3]!
+  return (
+    <div className="relative shrink-0">
+      <button ref={btn} type="button" className="tile-viewport" aria-haspopup="menu" aria-expanded={open} aria-label={`Viewport: ${current.width === null ? 'Fit' : `${current.label} ${current.text}`}`} title="Viewport width of the page" onClick={() => setOpen((v) => !v)}>
+        <span>{current.text}</span>
+        <span aria-hidden="true">▾</span>
+      </button>
+      {open && (
+        <div ref={menu} role="menu" aria-label="Viewport" className="menu menu-end" onKeyDown={onKey}>
+          {VIEWPORTS.map((v) => (
+            <button
+              key={v.label}
+              type="button"
+              role="menuitemradio"
+              aria-checked={v.width === value}
+              className="menu-item"
+              onClick={() => {
+                useCanvas.getState().setTilePageWidth(id, v.width)
+                close()
+              }}
+            >
+              <span>{v.label}</span>
+              <span className="ml-auto font-mono">{v.width ?? 'page = tile'}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 /**
- * A web tile: a title bar (status dot, page title, reload, edit address, close) over the page. The page itself is a native view main
+ * A web tile: a title bar (status dot, page title, close), a navigation row (back, forward, reload, address) and the page. The page itself is a native view main
  * places over the body; while it may not show, the body shows its title and address instead.
  */
 export const WebTileNode = memo(function WebTileNode({ id, data, selected, dragging }: NodeProps<WebTileFlowNode>) {
-  const { title, address, loading, error } = data
+  const { title, address, loading, error, canGoBack = false, canGoForward = false, pageWidth = null } = data
+  const maximized = useCanvas((s) => s.maximized === id)
+  // focus mode: the tile leaves its slot and covers the board's free area, staying put while the canvas pans or zooms (as a maximized card does)
+  const bigStyle = useStore((s): CSSProperties | undefined => {
+    if (!maximized) return undefined
+    const [tx, ty, zoom] = s.transform
+    const abs = s.nodeLookup.get(id)?.internals.positionAbsolute
+    return {
+      position: 'absolute',
+      left: (MAX_MARGIN.left - tx) / zoom - (abs?.x ?? 0),
+      top: (MAX_MARGIN.top - ty) / zoom - (abs?.y ?? 0),
+      width: s.width - MAX_MARGIN.left - MAX_MARGIN.right,
+      height: s.height - MAX_MARGIN.top - MAX_MARGIN.bottom,
+      transform: `scale(${1 / zoom})`,
+      transformOrigin: '0 0',
+      pointerEvents: 'all',
+    }
+  }, shallow)
+  const toggleMax = () => useCanvas.getState().setMaximized(useCanvas.getState().maximized === id ? null : id)
+  useEffect(() => {
+    if (!maximized) return
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && useCanvas.getState().setMaximized(null)
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [maximized])
   const body = useRef<HTMLDivElement>(null)
-  const editBtn = useRef<HTMLButtonElement>(null)
   const resizing = useRef(false)
   const shown = usePlacement(id, body, resizing)
-  const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState('')
+  /** what the user is typing; null while the field just follows the page's address */
+  const [draft, setDraft] = useState<string | null>(null)
   const [problem, setProblem] = useState<string | null>(null)
   const hintId = useId()
   const label = title || address || 'Web page'
 
   const stopEditing = () => {
-    setEditing(false)
+    setDraft(null)
     setProblem(null)
-    editBtn.current?.focus()
   }
   const go = async () => {
+    if (draft === null) return
     const err = await useCanvas.getState().navigateTile(id, draft)
     if (!err) return stopEditing()
-    setProblem(err) // the field stays open, marked invalid; the message is the usual toast
+    setProblem(err) // the field stays as typed, marked invalid; the message is the usual toast
     useCanvas.getState().notify(err, 'error')
   }
+  const step = (way: 'back' | 'forward', can: boolean) => (can ? void useCanvas.getState().stepTile(id, way) : undefined)
   const enter = async () => {
     try {
       await window.api.invoke('webtile:focus', { id })
@@ -130,89 +228,91 @@ export const WebTileNode = memo(function WebTileNode({ id, data, selected, dragg
   return (
     <div
       className={`web-tile flex h-full w-full flex-col overflow-hidden rounded-xl border bg-surface ${selected ? 'is-selected border-white/45' : 'border-white/15'}`}
+      style={bigStyle}
       data-testid="web-tile"
+      data-maximized={maximized ? 'true' : undefined}
       data-shown={shown ? 'true' : 'false'}
       data-loading={loading ? 'true' : undefined}
     >
       <NodeResizer
         minWidth={TILE_MIN.w}
         minHeight={TILE_MIN.h}
-        isVisible={selected}
+        isVisible={selected && !maximized}
         lineClassName="resize-line"
         handleClassName="resize-handle"
         onResizeStart={() => (resizing.current = true)}
         onResizeEnd={() => (resizing.current = false)}
       />
-      <div className={`drag-handle card-head ${dragging ? 'cursor-grabbing' : 'cursor-grab'}`}>
+      <div
+        className={`drag-handle card-head ${dragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+        onDoubleClick={(e) => {
+          if (!(e.target as Element).closest('button')) toggleMax()
+        }}
+      >
         <span className={`status-dot shrink-0 ${error ? 'st-error' : loading ? 'st-working' : 'st-idle'}`} aria-hidden="true" />
-        {editing ? (
-          <form
-            className="nodrag min-w-0 flex-1"
-            onSubmit={(e) => {
-              e.preventDefault()
-              void go()
-            }}
-          >
-            <input
-              autoFocus
-              className="tile-address"
-              aria-label="Address"
-              aria-invalid={problem ? true : undefined}
-              aria-describedby={hintId}
-              maxLength={ADDRESS_MAX}
-              spellCheck={false}
-              value={draft}
-              onChange={(e) => {
-                setDraft(e.target.value)
-                setProblem(null)
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') {
-                  e.preventDefault()
-                  e.stopPropagation()
-                  stopEditing()
-                }
-              }}
-              onBlur={(e) => {
-                if (!e.currentTarget.form?.contains(e.relatedTarget as Node | null)) setEditing(false)
-              }}
-            />
-            <span id={hintId} className="sr-only">
-              {problem ?? 'Enter opens the address (http or https only), Esc cancels.'}
-            </span>
-          </form>
-        ) : (
-          <span className="name-text tile-title flex-1" title={address} data-testid="tile-title">
-            {error ? `${label} · ${error}` : label}
-          </span>
-        )}
-        <button type="button" className="icon-btn nodrag" aria-label="Reload page" title="Reload" onClick={() => void useCanvas.getState().reloadTile(id)}>
-          <svg {...icon}>
-            <path d="M10 6a4 4 0 11-1.2-2.85M10 1.8v2.6H7.4" />
-          </svg>
-        </button>
-        <button
-          ref={editBtn}
-          type="button"
-          className="icon-btn nodrag"
-          aria-label="Edit address"
-          aria-pressed={editing}
-          title="Edit address"
-          onClick={() => {
-            if (editing) return stopEditing()
-            setDraft(address)
-            setEditing(true)
-          }}
-        >
-          <svg {...icon}>
-            <path d="M2 10l.6-2.4 5.9-5.9a1 1 0 011.4 0l.4.4a1 1 0 010 1.4L4.4 9.4zM7.6 2.6l1.8 1.8" />
-          </svg>
+        <span className="name-text tile-title flex-1" title={address} data-testid="tile-title">
+          {error ? `${label} · ${error}` : label}
+        </span>
+        <button type="button" className="icon-btn nodrag" aria-label={maximized ? 'Leave focus mode' : 'Focus mode'} aria-pressed={maximized} title={maximized ? 'Restore (Esc)' : 'Focus mode (Ctrl+Shift+F)'} onClick={toggleMax}>
+          <svg {...icon}>{maximized ? <path d="M4.5 1.8v2.7H1.8M7.5 10.2V7.5h2.7M4.5 4.5L1.8 1.8M7.5 7.5l2.7 2.7" /> : <path d="M1.8 4.5V1.8h2.7M10.2 7.5v2.7H7.5M1.8 1.8l3 3M10.2 10.2l-3-3" />}</svg>
         </button>
         <button type="button" className="icon-btn icon-btn-close nodrag" aria-label="Close web tile" title="Close" onClick={() => void useCanvas.getState().closeTile(id)}>
           <svg {...icon} strokeWidth={1.5}>
             <path d="M2.5 2.5l7 7M9.5 2.5l-7 7" />
           </svg>
         </button>
+      </div>
+      <div className="tile-nav nodrag">
+        <button type="button" className="icon-btn" aria-label="Back" aria-disabled={!canGoBack} title={canGoBack ? 'Back' : 'Nothing to go back to'} onClick={() => step('back', canGoBack)}>
+          <svg {...icon}>
+            <path d="M7.5 2L3.5 6l4 4" />
+          </svg>
+        </button>
+        <button type="button" className="icon-btn" aria-label="Forward" aria-disabled={!canGoForward} title={canGoForward ? 'Forward' : 'Nothing to go forward to'} onClick={() => step('forward', canGoForward)}>
+          <svg {...icon}>
+            <path d="M4.5 2l4 4-4 4" />
+          </svg>
+        </button>
+        <button type="button" className="icon-btn" aria-label="Reload page" title="Reload" onClick={() => void useCanvas.getState().reloadTile(id)}>
+          <svg {...icon}>
+            <path d="M10 6a4 4 0 11-1.2-2.85M10 1.8v2.6H7.4" />
+          </svg>
+        </button>
+        <form
+          className="min-w-0 flex-1"
+          onSubmit={(e) => {
+            e.preventDefault()
+            void go()
+          }}
+        >
+          <input
+            className="tile-address"
+            aria-label="Address"
+            aria-invalid={problem ? true : undefined}
+            aria-describedby={hintId}
+            maxLength={ADDRESS_MAX}
+            spellCheck={false}
+            value={draft ?? address}
+            onFocus={(e) => e.currentTarget.select()}
+            onChange={(e) => {
+              setDraft(e.target.value)
+              setProblem(null)
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                e.preventDefault()
+                e.stopPropagation()
+                stopEditing()
+                e.currentTarget.blur()
+              }
+            }}
+            onBlur={stopEditing}
+          />
+          <span id={hintId} className="sr-only">
+            {problem ?? 'Enter opens the address (http or https only), Esc restores it.'}
+          </span>
+        </form>
+        <ViewportMenu id={id} value={pageWidth} />
       </div>
       {/* the native page sits over this box; the box itself is the keyboard way in (Enter) and, while the page is hidden, its static mirror (title and address) */}
       <div

@@ -1,10 +1,12 @@
 import { useEffect, useId, useRef, useState } from 'react'
+import { useStore } from '@xyflow/react'
 import { PROMPT_MAX } from '../../shared/agent'
 import { ConnectMenu } from '../flow/ConnectMenu'
 import { HandoffSection } from './HandoffSection'
 import { LoopSection } from './LoopSection'
 import type { AgentInfo } from '../graph'
 import { useCanvas, type LastMessage } from '../store'
+import { formatMem } from '../chrome/memoryUsage'
 
 export const NO_STATUS = 'Live status is unavailable. Check in the terminal that Claude is ready before sending.'
 export const STARTING = 'Answer the dialog in the terminal first'
@@ -12,7 +14,7 @@ export const WAITING = 'Answer in the terminal first'
 
 const SOURCE: Record<LastMessage['source'], string> = {
   transcript: 'From the session transcript',
-  scrape: 'Best effort · scraped from the terminal',
+  scrape: 'Read from the terminal · may be incomplete',
   none: 'No message yet',
 }
 
@@ -29,14 +31,18 @@ function useElapsed(since: number, running: boolean): string {
 
 type Props = { ptyId: string; name: string; agent: AgentInfo; startedAt: number; running: boolean; workspaceId?: string; onClose: () => void }
 
-/** Opened from the card's name: role, model, branch, elapsed time, the last message, the prompt box, the agent's loop and its handoff. */
+/** Opened from the card's name: role, model, branch, elapsed time, memory in use, the last message, the prompt box, the agent's loop and its handoff. */
 export function DetailsPopover({ ptyId, name, agent, startedAt, running, workspaceId, onClose }: Props) {
   const lastMessage = useCanvas((s) => s.lastMessage)
   const sendPrompt = useCanvas((s) => s.sendPrompt)
+  // what its processes hold now, from the same reading as Memory → Usage; unknown until the first one arrives
+  const mem = useCanvas((s) => s.memory?.terminals.find((t) => t.id === ptyId)?.bytes)
   const [msg, setMsg] = useState<LastMessage | null | undefined>(undefined)
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const area = useRef<HTMLTextAreaElement>(null)
+  const box = useRef<HTMLDivElement>(null)
+  const zoom = useStore((s) => s.transform[2])
   const lastText = useRef<HTMLDivElement>(null)
   const hint = useId()
   const sourceId = useId()
@@ -54,6 +60,25 @@ export function DetailsPopover({ ptyId, name, agent, startedAt, running, workspa
     return () => void (live = false)
   }, [ptyId, lastMessage])
   useEffect(() => (canSend ? area.current : lastText.current)?.focus(), [])
+  // The box may grow past its card (the Loop section): it must end above the bottom bars, which sit over the board. Measured in screen px,
+  // converted to the box's own px by its on-screen scale (board zoom, or 1 when maximized); the box scrolls inside.
+  useEffect(() => {
+    const el = box.current
+    if (!el) return
+    const fit = () => {
+      const r = el.getBoundingClientRect()
+      const scale = el.offsetHeight > 0 ? r.height / el.offsetHeight : 1
+      const floor = document.querySelector('[data-chrome=bottom]')?.getBoundingClientRect().top ?? innerHeight - 140
+      el.style.maxHeight = `${Math.round(Math.min(520, Math.max(160, (floor - 8 - r.top) / (scale || 1))))}px`
+    }
+    fit()
+    el.addEventListener('toggle', fit, true) // <details> toggle does not bubble: caught on the way down
+    addEventListener('resize', fit)
+    return () => {
+      el.removeEventListener('toggle', fit, true)
+      removeEventListener('resize', fit)
+    }
+  }, [zoom])
 
   const send = async () => {
     if (!canSend || !text.trim() || busy) return
@@ -65,6 +90,7 @@ export function DetailsPopover({ ptyId, name, agent, startedAt, running, workspa
 
   return (
     <div
+      ref={box}
       className="details-box nodrag nowheel nopan"
       role="dialog"
       aria-label={`Details for ${name}`}
@@ -86,6 +112,8 @@ export function DetailsPopover({ ptyId, name, agent, startedAt, running, workspa
         </dd>
         <dt>Elapsed</dt>
         <dd>{elapsed}</dd>
+        <dt>Memory</dt>
+        <dd data-testid="agent-memory">{mem === undefined ? '—' : formatMem(mem)}</dd>
         {agent.report && (
           <>
             <dt>Status</dt>
@@ -123,7 +151,7 @@ export function DetailsPopover({ ptyId, name, agent, startedAt, running, workspa
         <p id={hint} className={`field-hint m-0 flex-1 ${note ? 'field-hint-error' : ''}`} data-testid="prompt-hint">
           {note ? `${note}${canSend ? ' Ctrl+Enter sends · Esc closes.' : ''}` : 'Ctrl+Enter sends · Esc closes. If Claude asks to trust the folder, answer it in the terminal first.'}
         </p>
-        <button type="button" className="btn-accent" disabled={!canSend || !text.trim() || busy} onClick={() => void send()}>
+        <button type="button" className="btn-accent" aria-busy={busy || undefined} disabled={!canSend || !text.trim()} onClick={() => void send()}>
           Send
         </button>
       </div>

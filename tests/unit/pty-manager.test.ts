@@ -262,3 +262,15 @@ describe('PtyManager pause all (SIGSTOP / SIGCONT)', () => {
     }
   })
 })
+
+describe('PtyManager.leaders', () => {
+  it('lists id and pid of live terminals of one owner and omits killing ones', () => {
+    const { mgr, ptys } = setup()
+    const a = mgr.spawn(1, 80, 24).id
+    const b = mgr.spawn(1, 80, 24).id
+    mgr.spawn(2, 80, 24)
+    expect(mgr.leaders(1)).toEqual([{ id: a, pid: ptys[0]!.pid }, { id: b, pid: ptys[1]!.pid }])
+    void mgr.kill(1, a)
+    expect(mgr.leaders(1)).toEqual([{ id: b, pid: ptys[1]!.pid }])
+  })
+})

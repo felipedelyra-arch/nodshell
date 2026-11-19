@@ -46,8 +46,8 @@ export function GroupPopover({ onClose }: { onClose: () => void }) {
         <button type="button" className="btn-quiet" onClick={onClose}>
           Cancel
         </button>
-        <button type="submit" className="btn-accent" disabled={!valid || busy}>
-          {busy ? 'Grouping…' : 'Create group'}
+        <button type="submit" className="btn-accent" aria-busy={busy || undefined} disabled={!valid}>
+          Create group
         </button>
       </div>
     </form>

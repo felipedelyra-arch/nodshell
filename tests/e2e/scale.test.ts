@@ -45,7 +45,7 @@ async function zoomTo(page: Page, target: number, dir: 'out' | 'in'): Promise<vo
     .toBe(true)
 }
 
-test('20 terminals (two squads and two consoles) stay alive and the board stays responsive; zoomed out no xterm is mounted; the 21st is refused', async () => {
+test('20 terminals (two squads and two consoles) stay alive and the board stays responsive; zoomed out the cards show a summary instead of the terminal; the 21st is refused', async () => {
   test.setTimeout(420_000)
   const r = setupRepo()
   const { app, page, errors } = await launch(r.env)
@@ -79,7 +79,7 @@ test('20 terminals (two squads and two consoles) stay alive and the board stays 
     // fitted to the whole board the zoom is low: previews, no xterm
     await page.screenshot({ path: test.info().outputPath('f10-overview.png') })
     await expect(page.locator('.xterm:visible')).toHaveCount(0)
-    await zoomTo(page, 0.6, 'in')
+    await zoomTo(page, 0.9, 'in')
     await expect(page.locator('.xterm:visible')).toHaveCount(18) // the two Orchestrator terminals only show maximized
     await expect(page.locator('.xterm')).toHaveCount(20)
     await expectPainted(page)
@@ -124,7 +124,7 @@ test('20 terminals (two squads and two consoles) stay alive and the board stays 
     for (const pid of pids) expect(alive(pid)).toBe(true)
 
     // back in: the terminals come back with their recent content
-    await zoomTo(page, 0.6, 'in')
+    await zoomTo(page, 0.9, 'in')
     await expect(page.locator('.xterm:visible')).toHaveCount(18) // the two Orchestrator terminals only show maximized
     await expect(page.locator('.xterm')).toHaveCount(20)
     await expect(page.getByTestId('terminal-preview')).toHaveCount(0)
@@ -133,6 +133,75 @@ test('20 terminals (two squads and two consoles) stay alive and the board stays 
     await expect(page.locator('.xterm[data-keep]')).toHaveCount(20) // the very same instances came back
     await expect(page.locator('.xterm:not([data-keep])')).toHaveCount(0)
     expect(stdinSize()).toEqual(inputBefore) // not one byte (no DA/DSR reply, no stray input) reached an agent
+    expect(errors).toEqual([])
+  } finally {
+    await app.close()
+  }
+})
+
+test('a Small squad that fits the window shows a legible summary per card; selecting one brings its terminal back; zooming in restores the terminals', async () => {
+  test.setTimeout(120_000)
+  const r = setupRepo()
+  const { app, page, errors } = await launch(r.env)
+  try {
+    await openRepo(page)
+    await page.getByRole('button', { name: 'Presets', exact: true }).click()
+    await page.getByRole('dialog', { name: 'Presets' }).getByRole('list', { name: 'Layouts' }).getByRole('button', { name: /^Small squad/ }).click()
+    await expect(page.getByTestId('agent-node')).toHaveCount(5, { timeout: 60_000 })
+    await expect(page.locator('[data-testid=agent-node][data-state=idle]')).toHaveCount(5, { timeout: 90_000 })
+    await page.getByRole('button', { name: 'New console' }).click() // a free card: cards inside a group cannot be selected
+    await expect(page.getByTestId('terminal-node')).toHaveCount(1)
+    await page.evaluate(() => document.querySelectorAll('.xterm').forEach((el) => el.setAttribute('data-keep', '1')))
+    const pids = r.runs().map((x) => x.pid)
+    const stdinSize = () => pids.map((pid) => { try { return statSync(join(r.logs, `${pid}.stdin`)).size } catch { return 0 } })
+    const inputBefore = stdinSize()
+    if ((await zoom(page)) >= 0.8) await zoomTo(page, 0.6, 'out') // the fitted board is already below ~0.82 with a full squad; make sure here
+    const cards = page.getByTestId('agent-node')
+    await expect(page.getByTestId('terminal-preview')).toHaveCount(6)
+    await expect(page.locator('.xterm:visible')).toHaveCount(0)
+    await page.screenshot({ path: test.info().outputPath('squad-summary.png') })
+    for (let i = 0; i < 5; i++) {
+      const c = cards.nth(i)
+      const name = (await c.getAttribute('data-name'))!
+      const sum = c.getByTestId('terminal-preview')
+      await expect(sum.getByTestId('summary-name')).toHaveText(name)
+      await expect(sum.getByTestId('summary-status')).toHaveText('resting')
+      await expect(sum).toHaveAttribute('aria-label', new RegExp(`^${name}, resting, last output: .*FAKE CLAUDE READY`))
+      // on-screen font = computed font-size x the scale the board applies to it
+      const px = await sum.evaluate((el) => {
+        const out: Record<string, number> = {}
+        for (const t of ['summary-name', 'summary-status', 'summary-lines']) {
+          const e = el.querySelector(`[data-testid=${t}]`)!
+          out[t] = parseFloat(getComputedStyle(e).fontSize) * (e.getBoundingClientRect().height / (e as HTMLElement).offsetHeight)
+        }
+        return out
+      })
+      expect(px['summary-name']).toBeGreaterThanOrEqual(13.9)
+      expect(px['summary-status']).toBeGreaterThanOrEqual(10.9)
+      expect(px['summary-lines']).toBeGreaterThanOrEqual(10.9)
+    }
+    // a selected card shows its terminal; the others keep the summary
+    await page.getByTestId('terminal-node').getByTestId('terminal-preview').click()
+    await expect(page.locator('.xterm:visible')).toHaveCount(1)
+    await expect(page.getByTestId('terminal-preview')).toHaveCount(5)
+    // a grouped card cannot be selected: double-clicking its summary opens it in focus mode, restoring brings the summaries back
+    const grouped = cards.first()
+    await expect(grouped.getByTestId('terminal-preview')).toHaveAttribute('title', 'Double-click to open')
+    await grouped.getByTestId('terminal-preview').dblclick()
+    await expect(grouped).toHaveAttribute('data-maximized', 'true')
+    await expect(grouped.locator('.xterm:visible')).toHaveCount(1)
+    await expect(grouped.getByTestId('terminal-preview')).toHaveCount(0)
+    await page.keyboard.press('Control+Shift+F')
+    await expect(grouped).not.toHaveAttribute('data-maximized', 'true')
+    await expect(grouped.getByTestId('terminal-preview')).toHaveCount(1)
+    await expect(page.getByTestId('terminal-preview')).toHaveCount(5)
+    // zoomed in past the threshold every terminal is back, the same instances
+    await zoomTo(page, 0.9, 'in')
+    await expect(page.getByTestId('terminal-preview')).toHaveCount(0)
+    await expect(page.locator('.xterm:visible')).toHaveCount(5) // 4 agents and the console; the Orchestrator terminal only shows maximized
+    await expect(page.locator('.xterm[data-keep]')).toHaveCount(6)
+    await expect(page.locator('.xterm:not([data-keep])')).toHaveCount(0)
+    expect(stdinSize()).toEqual(inputBefore)
     expect(errors).toEqual([])
   } finally {
     await app.close()

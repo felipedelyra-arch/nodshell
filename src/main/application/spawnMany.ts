@@ -26,6 +26,13 @@ export const RESERVE_BYTES = 2 ** 30
 // a terminal that just started has not grown into its memory yet: it still counts against the room for this long
 const SETTLE_MS = 30_000
 
+/** What one more agent costs: the mean memory of the agents that settled, never below AGENT_BYTES. Consoles are not passed in. */
+export function agentCost(agents: { bytes: number; ageMs: number }[]): number {
+  const settled = agents.filter((a) => a.ageMs >= SETTLE_MS)
+  if (settled.length === 0) return AGENT_BYTES
+  return Math.max(AGENT_BYTES, settled.reduce((n, a) => n + a.bytes, 0) / settled.length)
+}
+
 /**
  * Live-process budget shared by every batch: slots a running batch still has to fill are reserved, so two batches cannot both pass
  * the check. With `avail` (memory the system can still hand out) the budget is also what fits in memory.
@@ -38,7 +45,13 @@ export class Slots {
     private max: number | (() => number),
     private avail: () => number | null = () => null,
     private now: () => number = Date.now,
+    private perAgent: () => number = () => AGENT_BYTES,
   ) {}
+
+  /** Memory one more agent is budgeted at now. */
+  get agentBytes(): number {
+    return Math.max(AGENT_BYTES, this.perAgent())
+  }
 
   get limit(): number {
     return typeof this.max === 'number' ? this.max : this.max()
@@ -60,7 +73,7 @@ export class Slots {
     if (avail === null) return Infinity
     const t = this.now()
     this.started = this.started.filter((s) => t - s < SETTLE_MS)
-    return Math.floor((avail - RESERVE_BYTES) / AGENT_BYTES) - this.started.length - this.reserved
+    return Math.floor((avail - RESERVE_BYTES) / this.agentBytes) - this.started.length - this.reserved
   }
 
   free(): number {

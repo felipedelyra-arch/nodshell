@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { expect, test, type Page } from '@playwright/test'
 import { eventNames } from '../../src/shared/ipc/names'
-import { cleanupTemp, launch } from './helpers'
+import { cleanupTemp, launch, zoomInPast } from './helpers'
 import { END, openRepo, setupRepo, START, submissions } from './repo'
 
 test.afterEach(cleanupTemp)
@@ -51,6 +51,7 @@ test('acceptance: Frontend -> Reviewers fires on Stop, Pause all holds everythin
     await expect(details).toHaveCount(0)
 
     // a slow turn; Pause all in the middle of it freezes every process and the flow with it
+    await zoomInPast(page) // a fitted squad shows summaries; typing needs the terminal
     await card(page, front!).getByTestId('terminal-body').click()
     await page.keyboard.type('SLOW REPLY:ship it')
     await page.keyboard.press('Enter')

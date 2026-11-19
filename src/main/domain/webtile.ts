@@ -1,5 +1,5 @@
 // Pure web tile rules: what a tile may load and what of a page the app shows. No Electron.
-import { ADDRESS_MAX, ADDRESS_SHOWN_MAX, TITLE_MAX } from '../../shared/webtile'
+import { ADDRESS_MAX, ADDRESS_SHOWN_MAX, intersect, PAGE_ZOOM, SHOWN_SIDE_MIN, TITLE_MAX, type Box, type PageWidth } from '../../shared/webtile'
 import { cleanLine } from './task'
 
 export class WebTileError extends Error {}
@@ -84,15 +84,64 @@ export function shownAddress(url: string): string {
 }
 
 
-export type Box = { x: number; y: number; width: number; height: number }
+// What stopped, from a closed list: a raw value Electron adds later never reaches the record.
+const GONE_REASONS = ['clean-exit', 'abnormal-exit', 'killed', 'crashed', 'oom', 'launch-failed', 'integrity-failure', 'memory-eviction'] as const
+const CHILD_TYPES = ['Utility', 'Zygote', 'Sandbox helper', 'GPU', 'Pepper Plugin', 'Pepper Plugin Broker', 'Unknown'] as const
+export const FAILURES_MAX = 10
+/** Reason codes only: never an address, title, origin or page content. */
+export type Failure = { at: number; kind: 'gone' | 'unresponsive' | 'child' | 'app-renderer'; reason: string; exitCode: number | null; type?: string }
+
+export const goneReason = (raw: unknown): string => ((GONE_REASONS as readonly unknown[]).includes(raw) ? (raw as string) : 'other')
+export const childType = (raw: unknown): string => ((CHILD_TYPES as readonly unknown[]).includes(raw) ? (raw as string) : 'other')
+
+/** The short text a tile shows for a gone page (no colon; at most 100 characters). */
+export function goneText(reason: string): string {
+  switch (reason) {
+    case 'oom':
+    case 'memory-eviction':
+      return 'The page ran out of memory. Reload it'
+    case 'killed':
+      return 'The page was stopped by the system. Reload it'
+    case 'crashed':
+    case 'abnormal-exit':
+      return 'The page crashed. Reload it'
+    case 'launch-failed':
+    case 'integrity-failure':
+      return 'The page could not start. Reload it'
+    default:
+      return 'The page stopped, reload it'
+  }
+}
+export const NOT_RESPONDING = 'The page is not responding. Wait or reload it'
+
+/** The last FAILURES_MAX records, newest last. */
+export const pushFailure = (list: readonly Failure[], f: Failure): Failure[] => [...list, f].slice(-FAILURES_MAX)
 
 /**
- * Where a tile's view goes in the window (DIP) from its body as the renderer measured it (CSS px): scaled by the app page's own zoom
- * factor (Ctrl+Plus would otherwise move it over the chrome), then rounded. `inside`: the whole box lies within the window's content.
+ * Where a tile's page goes in the window (DIP) from its body and the board's free area as the renderer measured them (CSS px), each
+ * scaled by the app page's own zoom factor (Ctrl+Plus would otherwise move it over the chrome), then rounded. `clip`: the part of the
+ * area inside the free area and the window (only that part is drawn). `page`: the whole area, relative to the clip, so the page keeps
+ * its size whatever the clip. `show`: the clip is big enough to be worth showing and the body (the page is drawn whole) is at most PAGE_SPAN_MAX times the window on each side.
+ * `pageWidth` (a viewport preset): the page lays out at that many CSS px whatever the body's size. Mobile and Tablet never upscale: a
+ * body wider than the preset gets a centred area of exactly that width at zoom 1; otherwise (and for Desktop) the page zoom is body ÷ width.
+ * `zoom`: the page zoom this asks for, null = the caller's (the board zoom).
  */
-export function viewBounds(css: Box, zoomFactor: number, content: { width: number; height: number }): { bounds: Box; inside: boolean } {
+/** A page this many times the window's content size (per side) is never drawn: its raster could exhaust GPU and RAM. */
+export const PAGE_SPAN_MAX = 2
+
+export function viewBounds(cssBody: Box, cssFree: Box, zoomFactor: number, content: { width: number; height: number }, pageWidth: PageWidth | null = null): { clip: Box; page: Box; show: boolean; zoom: number | null } {
   const k = Number.isFinite(zoomFactor) && zoomFactor > 0 ? zoomFactor : 1
-  const bounds = { x: Math.round(css.x * k), y: Math.round(css.y * k), width: Math.round(css.width * k), height: Math.round(css.height * k) }
-  const inside = bounds.width >= 1 && bounds.height >= 1 && bounds.x >= 0 && bounds.y >= 0 && bounds.x + bounds.width <= content.width && bounds.y + bounds.height <= content.height
-  return { bounds, inside }
+  const dip = (b: Box): Box => ({ x: Math.round(b.x * k), y: Math.round(b.y * k), width: Math.round(b.width * k), height: Math.round(b.height * k) })
+  const body = dip(cssBody)
+  let area = body
+  let zoom: number | null = null
+  if (pageWidth !== null && body.width > 0) {
+    if (pageWidth < 1440 && body.width > pageWidth) {
+      area = { ...body, x: body.x + Math.round((body.width - pageWidth) / 2), width: pageWidth }
+      zoom = 1
+    } else zoom = Math.min(PAGE_ZOOM.max, Math.max(PAGE_ZOOM.min, body.width / pageWidth))
+  }
+  const clip = intersect(intersect(area, dip(cssFree)), { x: 0, y: 0, ...content }) // never trusts a free area past the window
+  const page = { x: area.x - clip.x, y: area.y - clip.y, width: area.width, height: area.height }
+  return { clip, page, show: clip.width >= SHOWN_SIDE_MIN && clip.height >= SHOWN_SIDE_MIN && body.width <= PAGE_SPAN_MAX * content.width && body.height <= PAGE_SPAN_MAX * content.height, zoom }
 }

@@ -54,6 +54,17 @@ test('agent card: one-line header, details popover by click and keyboard, prompt
     await expect(dlg).toContainText('agent/builder-1')
     await expect(dlg).toContainText(/\d\d:\d\d/)
     await expect(dlg.getByTestId('last-source')).toHaveAttribute('data-source', 'scrape')
+    // memory in use: a dash until the first reading, then a size
+    await expect(dlg.getByTestId('agent-memory')).toHaveText(/^(—|\d+ MB|\d+\.\d GB)$/)
+    await expect(dlg.getByTestId('agent-memory')).toHaveText(/^(\d+ MB|\d+\.\d GB)$/, { timeout: 15_000 })
+    // nothing of it is cut off by the card: Send and the hand-off row are in view, below the header
+    const sendBox = (await dlg.getByRole('button', { name: 'Send', exact: true }).boundingBox())!
+    const dlgBox = (await dlg.boundingBox())!
+    const headBox = (await head.boundingBox())!
+    expect(sendBox.y + sendBox.height).toBeLessThanOrEqual(dlgBox.y + dlgBox.height)
+    expect(dlgBox.y).toBeGreaterThanOrEqual(headBox.y + headBox.height)
+    await expect(dlg.getByRole('button', { name: 'Send', exact: true })).toBeInViewport({ ratio: 1 })
+    await expect(dlg.getByTestId('handoff-section')).toBeInViewport({ ratio: 1 })
     // Esc closes and gives the focus back to the name; Enter opens it again
     await page.keyboard.press('Escape')
     await expect(dlg).toHaveCount(0)
@@ -150,6 +161,82 @@ test('console card: same header, pin blocks dragging, maximize and restore keep 
     expect(netScale).toBeCloseTo(1, 2)
     await expect(card.locator('.xterm[data-keep="1"]')).toHaveCount(1)
     await head.getByRole('button', { name: 'Restore console-1' }).click()
+    await expect(card).not.toHaveAttribute('data-maximized', 'true')
+    await clean(page, errors)
+  } finally {
+    await app.close()
+  }
+})
+
+test('focus mode: double-click on the header and Ctrl+Shift+F maximize and restore; the PTY is resized to what fits and gets no key from the chord', async () => {
+  test.setTimeout(90_000)
+  const { app, page, errors } = await launch()
+  try {
+    await newConsole(page, 1)
+    const card = page.getByTestId('terminal-node').nth(0)
+    const head = card.locator('.card-head')
+    const rowsText = () => card.locator('.xterm-rows > div').evaluateAll((rows) => rows.map((r) => r.textContent ?? ''))
+    const viewport = () => page.locator('.react-flow__viewport').evaluate((el) => getComputedStyle(el).transform)
+    const sttySize = async () => {
+      await typeIn(page, 0, 'stty size')
+      await page.waitForTimeout(400)
+      const m = (await rowsText()).filter((l) => /^\d+ \d+$/.test(l.trim())).pop()!.trim().split(' ').map(Number)
+      return { rows: m[0]!, cols: m[1]! }
+    }
+    const dbl = () => head.dblclick({ position: { x: 200, y: 12 } })
+    const before = await sttySize()
+    const b0 = await box(card)
+    const vp0 = await viewport()
+    const flowPos = await card.locator('xpath=ancestor::div[@data-id]').evaluate((el) => (el as HTMLElement).style.transform)
+
+    // double-click on the header maximizes (no text selected, no drag), and again restores
+    await dbl()
+    await expect(card).toHaveAttribute('data-maximized', 'true')
+    expect(await page.evaluate(() => getSelection()?.toString())).toBe('')
+    await expect.poll(async () => (await box(card)).width).toBeGreaterThan(1000)
+    await expect.poll(async () => (await sttySize()).cols).toBeGreaterThan(before.cols)
+    const max = await sttySize()
+    // what the PTY was told is what the xterm shows: rows are the DOM rows; a long line wraps at the column count
+    await typeIn(page, 0, "head -c 500 /dev/zero | tr '\\0' Q; echo")
+    await page.waitForTimeout(400)
+    const rows = await rowsText()
+    expect(rows.length).toBe(max.rows)
+    expect(rows.find((l) => /^Q+$/.test(l))!.length).toBe(max.cols)
+    await dbl()
+    await expect(card).not.toHaveAttribute('data-maximized', 'true')
+    await expect.poll(async () => (await sttySize())).toEqual(before)
+    test.info().annotations.push({ type: 'stty', description: `before ${before.rows}x${before.cols}, maximized ${max.rows}x${max.cols}` })
+    expect(await box(card)).toEqual(b0)
+    expect(await viewport()).toBe(vp0)
+    // a double-click on a header button does not toggle (pin is a button)
+    await head.getByRole('button', { name: 'Pin console-1' }).dblclick()
+    await expect(card).not.toHaveAttribute('data-maximized', 'true')
+    // Ctrl+Shift+F from inside the terminal: toggles, and not one byte of it reaches the shell (cat -v would echo ^F)
+    await typeIn(page, 0, 'cat -v')
+    const carets = async () => (await rowsText()).filter((l) => l.includes('^F')).length
+    await page.keyboard.press('Control+f')
+    await page.keyboard.press('Enter')
+    await expect.poll(carets).toBe(2) // control: a plain Ctrl+F reaches the shell (echo, then cat's output)
+    await page.keyboard.press('Control+Shift+F')
+    await expect(card).toHaveAttribute('data-maximized', 'true')
+    await page.keyboard.press('Enter')
+    await page.waitForTimeout(400)
+    expect(await carets()).toBe(2) // the chord added no ^F
+    await page.keyboard.press('Control+Shift+F')
+    await expect(card).not.toHaveAttribute('data-maximized', 'true')
+    await page.keyboard.press('Control+d')
+    expect(await box(card)).toEqual(b0)
+    expect(await viewport()).toBe(vp0)
+    expect(await card.locator('xpath=ancestor::div[@data-id]').evaluate((el) => (el as HTMLElement).style.transform)).toBe(flowPos)
+    expect(await sttySize()).toEqual(before)
+
+    // not in a terminal: the single selected card toggles; Esc outside the terminal still restores
+    await head.click({ position: { x: 200, y: 12 } })
+    await expect(card).toHaveClass(/is-selected/)
+    await page.keyboard.press('Control+Shift+F')
+    await expect(card).toHaveAttribute('data-maximized', 'true')
+    await expect(head.getByRole('button', { name: 'Restore console-1' })).toHaveAttribute('title', /Esc outside the terminal/)
+    await page.keyboard.press('Control+Shift+F')
     await expect(card).not.toHaveAttribute('data-maximized', 'true')
     await clean(page, errors)
   } finally {
@@ -276,6 +363,59 @@ test('screenshot: a group of two agents, a console, one card selected', async ()
     await page.mouse.move(700, 880)
     await page.waitForTimeout(600)
     await page.screenshot({ path: test.info().outputPath('c2.png') })
+  } finally {
+    await app.close()
+  }
+})
+
+test('review fixes: header hit areas stop at the terminal, a focused terminal frame keeps its keys, details stay above the bottom bars', async () => {
+  test.setTimeout(90_000)
+  const r = setupRepo()
+  const { app, page, errors } = await launch({ ...r.env, NODSHELL_WHISPER_BIN: '/nonexistent/whisper-cli' })
+  try {
+    // 1. a click 2 px below the header, under the close button and under the name, lands in the terminal: nothing closes, no popover
+    await newConsole(page, 1)
+    const card = page.getByTestId('terminal-node').first()
+    const head = await box(card.locator('.card-head'))
+    const close = await box(card.getByRole('button', { name: /^Close / }))
+    const below = head.y + head.height + 2
+    for (const hit of [page.evaluate(([x, y]) => document.elementFromPoint(x!, y!)?.closest('.card-head, .term-body')?.className ?? '', [close.x + close.width / 2, below]), page.evaluate(([x, y]) => document.elementFromPoint(x!, y!)?.closest('.card-head, .term-body')?.className ?? '', [head.x + 40, below])])
+      expect(await hit).toContain('term-body')
+    await page.mouse.click(close.x + close.width / 2, below)
+    await expect(page.getByTestId('terminal-node')).toHaveCount(1)
+
+    // 2. focus on the terminal's frame: a tool letter does not switch the tool, Space does not start a recording
+    const pressed = () => page.getByRole('toolbar', { name: 'Board tools' }).locator('[aria-pressed=true]').evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')))
+    const before = await pressed()
+    await card.getByTestId('terminal-body').focus()
+    await expect(card.getByTestId('terminal-body')).toBeFocused()
+    for (const k of ['p', 'e', 't']) await page.keyboard.press(k)
+    expect(await pressed()).toEqual(before)
+    await page.keyboard.down('Space')
+    await page.waitForTimeout(600)
+    await page.keyboard.up('Space')
+    await expect(page.locator('.is-listening')).toHaveCount(0)
+
+    // 3. an agent card low on the board: with Loop open, the details end above the bottom bars and scroll inside
+    await openRepo(page)
+    await spawnAgent(page, 'builder', 'haiku', 1)
+    const agent = page.getByTestId('agent-node').first()
+    await expect(agent).toHaveAttribute('data-state', 'idle')
+    const name = (await agent.getAttribute('data-name'))!
+    const pane = await box(page.locator('.react-flow__pane'))
+    const a = await box(agent.locator('.card-head'))
+    await page.mouse.move(pane.x + 20, a.y - 30)
+    await page.mouse.down()
+    await page.mouse.move(pane.x + 20, a.y - 30 + Math.max(0, pane.height - 420 - a.y), { steps: 6 }) // drag the board so the card sits low
+    await page.mouse.up()
+    await agent.locator('.card-head').getByRole('button', { name, exact: true }).click()
+    const details = page.getByRole('dialog', { name: `Details for ${name}` })
+    await details.getByTestId('loop-section').locator('summary').click()
+    const floor = (await box(page.locator('[data-chrome=bottom]'))).y
+    await expect.poll(async () => { const d = await box(details); return d.y + d.height }).toBeLessThanOrEqual(floor)
+    // its last control is reachable by scrolling inside the box
+    expect(await details.evaluate((el) => { el.scrollTop = el.scrollHeight; const last = [...el.querySelectorAll('button')].pop()!; return last.getBoundingClientRect().bottom <= el.getBoundingClientRect().bottom + 1 })).toBe(true)
+    await clean(page, errors)
   } finally {
     await app.close()
   }

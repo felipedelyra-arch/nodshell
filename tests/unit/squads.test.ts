@@ -137,7 +137,7 @@ describe('createSquad', () => {
 })
 
 const dto = (id: string, source: SourceEnd, target: TargetEnd, paused: string | null = null): FlowEdgeDto => ({ id, workspaceId: 'w', source, target, template: 't', condition: '', paused, note: null })
-const flags = { flowsPaused: false, firing: {}, lit: {} }
+const flags = { flowsPaused: false, paused: false, firing: {}, lit: {}, tasks: {} }
 const created = (k: number): SquadCreated => {
   const a = (id: string, role: string) => ({ id, name: `N${id}`, role, branch: `agent/${role}-${k}`, model: 'default', state: 'idle' as const, statusUnavailable: false })
   const roles = ['frontend', 'backend', 'tester', 'reviewer'] as const
@@ -272,9 +272,23 @@ describe('squad layout', () => {
     expect(flowEdges(removeCard(removeCard(nodes, '1reviewer1'), '1reviewer2'), all, flags)).toHaveLength(3)
     expect(flowEdges(removeCard(nodes, 'o1'), all, flags)).toEqual([])
     // paused (by itself or every flow), firing and lit come from the store
-    const paused = flowEdges(nodes, [dto('x', { kind: 'group', id: 'g1frontend' }, { kind: 'squad', id: 'q1' }, 'Loop detected')], { flowsPaused: false, firing: { x: 1 }, lit: { x: 1 } })
+    const paused = flowEdges(nodes, [dto('x', { kind: 'group', id: 'g1frontend' }, { kind: 'squad', id: 'q1' }, 'Loop detected')], { ...flags, firing: { x: 1 }, lit: { x: 1 } })
     expect(paused[0]!.data).toMatchObject({ paused: true, firing: true, lit: true })
     expect(flowEdges(nodes, all, { ...flags, flowsPaused: true }).every((e) => e.data!.paused)).toBe(true)
+    // what the dots show: idle -> forward and slow; a running delegation to one of the group's agents -> towards the group, fast
+    expect(edges[0]!.data!.activity).toEqual({ direction: 'forward', speed: 'slow', tone: 'normal' })
+    const tasks = (latest: { id: string; status: 'running' | 'failed' | 'done' | 'queued' }[]) => ({ q1: { squadId: 'q1', done: 0, total: latest.length, recent: [], latest } })
+    const fe = (t: Parameters<typeof tasks>[0], more = {}) => flowEdges(nodes, all, { ...flags, tasks: tasks(t), ...more })[0]!.data!.activity
+    expect(fe([{ id: '1frontend1', status: 'running' }])).toEqual({ direction: 'toGroup', speed: 'fast', tone: 'normal' })
+    expect(fe([{ id: 'g1frontend', status: 'running' }])).toMatchObject({ direction: 'toGroup' }) // to the group itself
+    expect(fe([{ id: '1backend1', status: 'running' }])).toMatchObject({ direction: 'forward', speed: 'slow' }) // another group's
+    expect(fe([{ id: '1frontend2', status: 'failed' }])).toMatchObject({ tone: 'error' })
+    expect(fe([], { firing: { [all[0]!.id]: 1 } })).toEqual({ direction: 'toOrchestrator', speed: 'fast', tone: 'normal' })
+    expect(fe([], { paused: true })).toMatchObject({ speed: 'stopped', tone: 'paused' })
+    // agent states at either end: a working member speeds the edge up; an Orchestrator in error turns it to the error tone
+    const state = (id: string, st: 'working' | 'error') => nodes.map((n) => (n.id === id && n.type === 'terminal' ? { ...n, data: { ...n.data, agent: { ...n.data.agent!, state: st } } } : n))
+    expect(flowEdges(state('1frontend2', 'working'), all, flags)[0]!.data!.activity).toMatchObject({ speed: 'fast', direction: 'forward' })
+    expect(flowEdges(state('o1', 'error'), all, flags).map((e) => e.data!.activity.tone)).toEqual(['error', 'error', 'error', 'error'])
   })
   it('an agent edge leaves the side facing its target; ends, consoles and the docked Orchestrator', () => {
     const nodes = addSquad([cardNode('c', { ptyId: 'c', name: 'console-1', status: 'running', startedAt: 0 }, { x: 0, y: 0 })], created(1), 0)

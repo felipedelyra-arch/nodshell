@@ -19,8 +19,11 @@ import { TerminalNode } from './terminal/TerminalNode'
 import { BugDialog } from './chrome/InfoDialogs'
 import { RestoreDialog, type RestoreChoices } from './chrome/RestoreDialog'
 import { MemoryDialog } from './chrome/MemoryDialog'
+import { formatGB, nextWarning, usedBytes, usedPercent } from './chrome/memoryUsage'
+import { startFocusChord } from './board/focusChord'
 import { startLayoutSaver } from './board/layout'
 import { CommandBar } from './chrome/CommandBar'
+import { useBusy } from './chrome/useBusy'
 import { BugButton, RepoFooter } from './chrome/Footer'
 import { TopBar, TopRight } from './TopBar'
 import { WebTileNode } from './webtile/WebTileNode'
@@ -60,23 +63,25 @@ function WorkspaceViewport() {
   return null
 }
 
-type PillProps = { children: ReactNode; onClick: () => void; hue: number; tip?: string; popup?: 'dialog'; expanded?: boolean }
+type PillProps = { children: ReactNode; onClick: () => unknown; hue?: number; danger?: boolean; tip?: string; popup?: 'dialog'; expanded?: boolean }
 
-/** A bar pill. With `tip` it is visibly and semantically disabled, and the tip says why. */
-const Pill = forwardRef<HTMLButtonElement, PillProps>(function Pill({ children, onClick, hue, tip, popup, expanded }, ref) {
+/** A bar pill. With `tip` it is visibly and semantically disabled, and the tip says why. An action that returns a promise shows busy until it settles. */
+const Pill = forwardRef<HTMLButtonElement, PillProps>(function Pill({ children, onClick, hue, danger, tip, popup, expanded }, ref) {
   const tipId = useId()
+  const [busy, run] = useBusy()
   return (
     <>
       <button
         ref={ref}
         type="button"
-        className={`pill pill-h${hue} pointer-events-auto`}
+        className={`pill ${danger ? 'pill-danger' : `pill-h${hue}`} pointer-events-auto`}
+        aria-busy={busy || undefined}
         aria-disabled={tip ? true : popup ? false : undefined}
         aria-haspopup={popup}
         aria-expanded={popup ? expanded : undefined}
         aria-describedby={tip ? tipId : undefined}
         data-tip={tip}
-        onClick={() => !tip && onClick()}
+        onClick={() => !tip && void run(onClick)}
       >
         {children}
       </button>
@@ -110,6 +115,7 @@ function Workbench() {
   const paused = useCanvas((s) => s.paused)
   const firing = useCanvas((s) => s.firing)
   const lit = useCanvas((s) => s.lit)
+  const tasks = useCanvas((s) => s.tasks)
   const restoring = useCanvas((s) => s.restoring)
   // one briefing at a time: the first that is ready opens its dialog
   const handoff = useCanvas((s) => s.handoffs.find((h) => h.state === 'ready'))
@@ -118,7 +124,7 @@ function Workbench() {
   const selectedCount = groupableIds(board).length
   const terminalCount = board.filter(isTerminal).length
   const pickedCount = board.filter((n) => isTerminal(n) && n.selected).length
-  const edges = useMemo(() => flowEdges(board, flowEdgeList, { flowsPaused, firing, lit }), [board, flowEdgeList, flowsPaused, firing, lit])
+  const edges = useMemo(() => flowEdges(board, flowEdgeList, { flowsPaused, paused, firing, lit, tasks }), [board, flowEdgeList, flowsPaused, paused, firing, lit, tasks])
   const anyAlive = allNodes.some((n) => isTerminal(n) && isAlive(n.data))
   /** Drag from a card's or group's side onto another card, group or Orchestrator node of this board. */
   const connectNodes = (fromId: string, toId: string) => {
@@ -142,13 +148,31 @@ function Workbench() {
   const [bugOpen, setBugOpen] = useState(false)
   const memoryBtn = useRef<HTMLButtonElement>(null)
   const [memoryOpen, setMemoryOpen] = useState(false)
+  const [memoryTab, setMemoryTab] = useState<'usage' | undefined>(undefined) // set only when the dialog is opened from the 80% warning
   const bar = useRef<HTMLDivElement>(null)
   const [choices, setChoices] = useState<RestoreChoices | null>(null)
   useEffect(() => window.api.on('board:choose', setChoices), [])
 
   useEffect(() => {
     void window.api.invoke('settings:get', undefined).then((r) => useCanvas.getState().setLiveLimit(r.liveLimit), () => undefined)
-    return window.api.on('app:memory', ({ bytes }) => useCanvas.setState({ memoryBytes: bytes }))
+    let armed = true
+    return window.api.on('app:memory', (report) => {
+      useCanvas.setState({ memoryBytes: report.bytes, memory: report })
+      const pct = usedPercent(report.system)
+      const next = nextWarning(pct, armed)
+      armed = next.armed
+      if (next.warn && report.system) {
+        const { total } = report.system
+        // only tells: nothing is paused or closed for the user
+        useCanvas.getState().notify(`Memory is at ${pct}% (${formatGB(usedBytes(report.system))} of ${formatGB(total)} GB). Pause idle agents or close terminals you are not using.`, 'info', {
+          label: 'See usage',
+          run: () => {
+            setMemoryTab('usage')
+            setMemoryOpen(true)
+          },
+        })
+      }
+    })
   }, [])
   useEffect(() => startBus((id) => useCanvas.getState().markExited(id)), [])
   useEffect(() => window.api.on('agent:state', ({ id, state, statusUnavailable }) => useCanvas.getState().setAgentState(id, state, statusUnavailable)), [])
@@ -168,6 +192,23 @@ function Workbench() {
       }),
       window.api.on('squad:spawned', (e) => useCanvas.getState().squadSpawned(e)),
       window.api.on('webtile:changed', (e) => useCanvas.getState().setTileState(e)),
+      // only an offer: the tile opens when the user clicks, through the same action (and main check) as a typed address
+      window.api.on('webtile:suggest', ({ terminalId, address }) => {
+        const s = useCanvas.getState()
+        const name = s.nodes.find((n) => n.type === 'terminal' && (n.data as { ptyId?: string }).ptyId === terminalId)?.data as { name?: string } | undefined
+        s.notify(
+          `${name?.name ?? 'A terminal'} printed ${address}`,
+          'info',
+          {
+            label: 'Open as web tile',
+            run: () => {
+              useCanvas.setState({ toast: null }) // one click, one tile
+              void useCanvas.getState().addWebTile(address).then((err) => err && useCanvas.getState().notify(err, 'error'))
+            },
+          },
+          { low: true },
+        )
+      }),
       // F6 in a page: main gave the focus back to this window; it lands on that tile
       window.api.on('webtile:returned', ({ id }) => document.querySelector<HTMLElement>(`[data-tile-body="${CSS.escape(id)}"]`)?.focus()),
     ]
@@ -175,6 +216,7 @@ function Workbench() {
   }, [])
   useEffect(() => void usePresets.getState().load(), [])
   useEffect(() => startLayoutSaver(), [])
+  useEffect(() => startFocusChord(), [])
   useEffect(() => void useCanvas.getState().restore(), [])
   useEffect(() => {
     if (!open) return
@@ -216,7 +258,7 @@ function Workbench() {
           isValidConnection={(c) => c.source !== c.target}
           onConnect={(c) => connectNodes(c.source, c.target)}
           onConnectEnd={onConnectEnd}
-          connectionLineStyle={{ stroke: '#ff6a2b', strokeWidth: 1.5 }}
+          connectionLineStyle={{ stroke: 'var(--color-accent)', strokeWidth: 1.5 }}
           defaultViewport={{ x: 0, y: 0, zoom: 1 }}
           minZoom={0.2}
           maxZoom={2}
@@ -228,7 +270,7 @@ function Workbench() {
           disableKeyboardA11y
           proOptions={{ hideAttribution: true }}
         >
-          <Background variant={BackgroundVariant.Dots} gap={24} size={1.6} color="#3a3a43" />
+          <Background variant={BackgroundVariant.Dots} gap={24} size={1.6} color="var(--color-grid-dot)" />
           <FitOnSpawn />
           <WorkspaceViewport />
           <AnnotationLayer />
@@ -237,7 +279,7 @@ function Workbench() {
       </div>
       {board.length === 0 && (
         <p className="pointer-events-none absolute inset-0 z-10 grid place-items-center font-mono text-xs text-muted">
-          No terminals yet. Use New console, or open a repository to start agents.
+          No terminals yet. Start one with New console, or open a folder to add agents.
         </p>
       )}
       <Toolbar
@@ -256,12 +298,17 @@ function Workbench() {
             className="pointer-events-auto max-w-lg rounded-md border border-white/10 bg-surface px-3 py-1 text-xs text-text"
           >
             {toast.text}
+            {toast.action && (
+              <button type="button" className="btn-quiet ml-2" onClick={toast.action.run}>
+                {toast.action.label}
+              </button>
+            )}
           </p>
         )}
         <div ref={bar} className="relative flex gap-2">
           {open === 'spawn' && <SpawnPopover onClose={closePopover(spawnBtn)} />}
           {open === 'group' && <GroupPopover onClose={closePopover(groupBtn)} />}
-          <Pill hue={0} tip={paused ? PAUSED_TIP : undefined} onClick={() => void addConsole()}>
+          <Pill hue={0} tip={paused ? PAUSED_TIP : undefined} onClick={() => addConsole()}>
             New console
           </Pill>
           <Pill hue={1} ref={spawnBtn} popup="dialog" expanded={open === 'spawn'} tip={spawnTip} onClick={() => {
@@ -285,10 +332,10 @@ function Workbench() {
           >
             Presets
           </Pill>
-          <Pill hue={4} tip={paused ? 'Everything is already paused' : anyAlive ? undefined : 'Nothing is running'} onClick={() => void useCanvas.getState().pauseAll()}>
+          <Pill hue={4} tip={paused ? 'Everything is already paused' : anyAlive ? undefined : 'Nothing is running'} onClick={() => useCanvas.getState().pauseAll()}>
             Pause all
           </Pill>
-          <Pill hue={5} tip={paused || flowsPaused ? undefined : 'Nothing is paused'} onClick={() => void useCanvas.getState().resumeAll()}>
+          <Pill hue={5} tip={paused || flowsPaused ? undefined : 'Nothing is paused'} onClick={() => useCanvas.getState().resumeAll()}>
             Resume all
           </Pill>
           <Pill
@@ -298,12 +345,13 @@ function Workbench() {
             expanded={memoryOpen}
             onClick={() => {
               setOpen(null)
+              setMemoryTab(undefined)
               setMemoryOpen(true)
             }}
           >
             Memory
           </Pill>
-          <Pill hue={7} tip={terminalCount === 0 ? 'No terminals on this board' : undefined} onClick={() => void useCanvas.getState().closeTerminals()}>
+          <Pill danger tip={terminalCount === 0 ? 'No terminals on this board' : undefined} onClick={() => useCanvas.getState().closeTerminals()}>
             {pickedCount > 0 ? `Close ${pickedCount} selected` : 'Close all'}
           </Pill>
         </div>
@@ -320,6 +368,7 @@ function Workbench() {
       )}
       {memoryOpen && (
         <MemoryDialog
+          initialTab={memoryTab}
           onClose={() => {
             setMemoryOpen(false)
             memoryBtn.current?.focus()

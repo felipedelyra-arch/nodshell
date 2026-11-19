@@ -5,7 +5,7 @@ import { MEMORY_EDITOR_RE, MEMORY_MAX, MEMORY_SCOPES } from '../memory'
 import { CONDITION_MAX, EDGES_MAX, REASON_MAX, REPORT_MAX, TASK_STATUSES, TASK_TITLE_MAX, TASKS_MAX, TASKS_RECENT, TEMPLATE_MAX } from '../flow'
 import { CONTROL_RE, GROUP_NAME_MAX, PRESET_NAME_MAX } from '../preset'
 import { PCM_MAX_BYTES } from '../voice'
-import { ADDRESS_MAX, ADDRESS_SHOWN_MAX, TITLE_MAX, WEBTILES_MAX } from '../webtile'
+import { ADDRESS_MAX, ADDRESS_SHOWN_MAX, PAGE_WIDTHS, TITLE_MAX, WEBTILES_MAX } from '../webtile'
 import { GOAL_MAX, IDLE_MAX_SEC, IDLE_MIN_SEC, LOOP_RUNS_MAX, LOOP_STATES, OUTPUT_TEXT_MAX, SCHEDULE_MAX_SEC, SCHEDULE_MIN_SEC } from '../loop'
 import { BRIEFING_MAX, HANDOFF_STATES } from '../handoff'
 import { channelNames, eventNames } from './names'
@@ -18,8 +18,11 @@ const label = z.string().min(1).max(255)
 const state = z.enum(AGENT_STATES)
 const agentInfo = z.object({ id, name: z.string().regex(AGENT_NAME_RE), role: z.string().regex(ROLE_RE), branch: z.string().max(50), model: z.string().max(64), state, statusUnavailable: z.boolean() })
 const MAX_CARDS = LIVE_HARD_MAX // the PTY limit is configurable up to this ceiling
+/** a box in the app window, CSS px (a web tile's body, or the board's free area) */
+const tileBox = z.object({ x: z.number().finite().min(-100_000).max(100_000), y: z.number().finite().min(-100_000).max(100_000), width: z.number().finite().min(0).max(20_000), height: z.number().finite().min(0).max(20_000) })
 // live processes are capped at LIVE_HARD_MAX, but an exited agent keeps its card until closed, so a workspace can hold far more ids than that
 const MAX_BOARD_IDS = 200
+const commandIn = z.object({ text: z.string().min(1).max(PROMPT_MAX), workspaceId: id, squadId: id.optional() })
 const left = { kept: z.number().int().min(0).max(MAX_BOARD_IDS), archived: z.number().int().min(0).max(MAX_BOARD_IDS) }
 const presetOut = z.object({
   id,
@@ -58,6 +61,7 @@ const boardOut = z.object({
 // web tiles: the renderer types an address (main validates it) and gets back only a cleaned title and origin + path, never the page
 const address = z.string().min(1).max(ADDRESS_MAX)
 const tileText = { title: z.string().max(TITLE_MAX).refine((t) => !CONTROL_RE.test(t)), address: z.string().max(ADDRESS_SHOWN_MAX).refine((t) => !CONTROL_RE.test(t)) }
+const pageWidth = z.union([z.literal(PAGE_WIDTHS[0]), z.literal(PAGE_WIDTHS[1]), z.literal(PAGE_WIDTHS[2]), z.null()])
 const tileOut = z.object({ id, workspaceId: id, ...tileText })
 // a restored board, if any, and one line on what did not come back
 // annotations and web tiles come back with it, by workspace (also when the board has no terminals but something was drawn or a tile was open)
@@ -89,7 +93,7 @@ const handoffOut = z.object({ id, workspaceId: id, fromId: id, toId: id, state: 
 const restored = {
   board: boardOut.nullable(),
   annotations: z.array(workspaceAnnotations).max(WORKSPACES_MAX),
-  webTiles: z.array(tileOut.extend({ x: coord, y: coord, w: size, h: size })).max(WEBTILES_MAX),
+  webTiles: z.array(tileOut.extend({ x: coord, y: coord, w: size, h: size, pageWidth })).max(WEBTILES_MAX),
   notice: z.string().max(500).nullable(),
 }
 
@@ -134,10 +138,13 @@ export const channels = {
   'webtile:create': { in: z.object({ address, workspaceId: id }), out: z.object({ tile: tileOut }) },
   'webtile:navigate': { in: z.object({ id, address }), out: ok },
   'webtile:reload': { in: z.object({ id }), out: ok },
+  // one step in the page's history; every entry is still subject to the http/https navigation guards
+  'webtile:back': { in: z.object({ id }), out: ok },
+  'webtile:forward': { in: z.object({ id }), out: ok },
   'webtile:close': { in: z.object({ id }), out: ok },
   // high frequency (at most one per frame and tile): the tile's body in window pixels, the board zoom, and whether it may show
   'webtile:place': {
-    in: z.object({ id, x: z.number().finite().min(-100_000).max(100_000), y: z.number().finite().min(-100_000).max(100_000), width: z.number().finite().min(0).max(20_000), height: z.number().finite().min(0).max(20_000), zoom: z.number().finite().min(0.05).max(4), visible: z.boolean() }),
+    in: z.object({ id, ...tileBox.shape, free: tileBox, zoom: z.number().finite().min(0.05).max(4), visible: z.boolean(), pageWidth }),
     out: ok,
   },
   // the keyboard way into the page (F6 in the page comes back)
@@ -198,8 +205,13 @@ export const channels = {
   'agent:prompt': { in: z.object({ id, text: z.string().min(1).max(PROMPT_MAX) }), out: ok },
   // a typed or dictated command: only text and scope (workspace, optionally one squad); main decides who gets it
   'command:send': {
-    in: z.object({ text: z.string().min(1).max(PROMPT_MAX), workspaceId: id, squadId: id.optional() }),
+    in: commandIn,
     out: z.object({ delivered: z.array(z.string().max(60)).max(MAX_BOARD_IDS), refused: z.array(z.object({ name: z.string().max(60), reason: z.string().max(300) })).max(MAX_BOARD_IDS + 2) }),
+  },
+  // who command:send would reach with this text right now: same routing and refusals, nothing is submitted
+  'command:preview': {
+    in: commandIn,
+    out: z.object({ targets: z.array(z.object({ name: z.string().max(60) })).max(40), refused: z.array(z.object({ name: z.string().max(60), reason: z.string().max(300) })).max(40), group: z.string().max(60).optional() }),
   },
   'voice:status': { in: z.undefined(), out: z.object({ available: z.boolean() }) },
   // 16 kHz mono 16-bit PCM, at most 60 s, in memory only
@@ -229,8 +241,13 @@ export const channels = {
 /** Main -> renderer events; validated in main before sending. */
 export const events = {
   'pty:data': z.object({ id, data: z.string() }),
-  // memory of the app and every terminal process, in bytes, every few seconds
-  'app:memory': z.object({ bytes: z.number().int().min(0) }),
+  // memory in bytes every few seconds: `bytes` = app + terminals; per terminal RSS of its whole session; system from /proc/meminfo
+  'app:memory': z.object({
+    bytes: z.number().int().min(0),
+    app: z.number().int().min(0),
+    terminals: z.array(z.object({ id, bytes: z.number().int().min(0) })).max(LIVE_HARD_MAX),
+    system: z.object({ total: z.number().int().min(0), available: z.number().int().min(0) }).nullable(),
+  }),
   'pty:exit': z.object({ id, code: z.number().int() }),
   'agent:state': z.object({ id, state, statusUnavailable: z.boolean(), at: z.number().int() }),
   // the whole flow state of the window after any change: edges, processes stopped, flows paused
@@ -247,6 +264,8 @@ export const events = {
     done: z.number().int().min(0).max(TASKS_MAX),
     total: z.number().int().min(0).max(TASKS_MAX),
     recent: z.array(z.object({ title: z.string().min(1).max(TASK_TITLE_MAX).refine((t) => !CONTROL_RE.test(t)), assignee: groupName, status: z.enum(TASK_STATUSES) })).max(TASKS_RECENT),
+    // per assignee (agent or group id), the state of its latest task: ids only
+    latest: z.array(z.object({ id, status: z.enum(TASK_STATUSES) })).max(TASKS_MAX),
   }),
   // an Orchestrator's spawn_agent started an agent: its card joins the squad group of its role (squadId null: the squad went away meanwhile)
   'squad:spawned': z.object({ squadId: id.nullable(), group: z.object({ id, name: groupName, role: z.string().regex(ROLE_RE), created: z.boolean() }).nullable(), agent: agentInfo, workspaceId: id.optional() }),
@@ -255,17 +274,19 @@ export const events = {
   // main is about to save the board for good (quit, close): the renderer sends its layout now
   'board:flush': z.object({}),
   // the user asked to pick which saved terminals come back; `room`: how many agents fit in memory now (null: unknown)
-  'board:choose': z.object({ terminals: z.array(z.object({ id, name: z.string().max(50), role: z.string().max(40).nullable() })).max(MAX_BOARD_IDS), room: z.number().int().min(0).nullable() }),
+  'board:choose': z.object({ terminals: z.array(z.object({ id, name: z.string().max(50), role: z.string().max(40).nullable() })).max(MAX_BOARD_IDS), room: z.number().int().min(0).nullable(), agentBytes: z.number().int().min(0) }),
   // every loop of the window after any change
   'loop:changed': z.object({ loops: z.array(loopOut).max(MAX_BOARD_IDS) }),
   // a loop ended or paused by itself (goal reached, max runs, watched terminal closed); shown to the user
   'loop:notice': z.object({ text: line(REASON_MAX + 100) }),
   // every handoff of the window after any change; notice: why one ended by itself (shown to the user)
   'handoff:changed': z.object({ handoffs: z.array(handoffOut).max(LIVE_HARD_MAX), notice: line(REASON_MAX + 100).nullable() }),
-  // a tile's title, address (origin + path), loading state and error (generic)
-  'webtile:changed': z.object({ id, ...tileText, loading: z.boolean(), error: z.string().max(100).nullable() }),
+  // a tile's title, address (origin + path), loading state, error (generic) and whether its history has a page before / after
+  'webtile:changed': z.object({ id, ...tileText, loading: z.boolean(), error: z.string().max(100).nullable(), canGoBack: z.boolean(), canGoForward: z.boolean() }),
   // F6 in the page: the focus is back in the app, on this tile
   'webtile:returned': z.object({ id }),
+  // a terminal printed a localhost address: the user may open it in a tile (nothing opens by itself)
+  'webtile:suggest': z.object({ terminalId: id, address: z.string().max(200).regex(/^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]):\d{1,5}(?:\/[A-Za-z0-9._~/-]*)?$/) }),
 } as const
 
 export type ChannelName = keyof typeof channels

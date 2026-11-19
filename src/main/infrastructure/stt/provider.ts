@@ -2,8 +2,8 @@ import { SAMPLE_RATE } from '../../../shared/voice'
 /** Speech to text, pluggable: whisper.cpp today; a cloud provider only has to implement this (its key would live in main). */
 export interface SttProvider {
   available(): boolean
-  /** `pcm`: 16 kHz mono signed 16-bit little-endian samples. Resolves to the text, '' when nothing was understood. */
-  transcribe(pcm: Uint8Array): Promise<string>
+  /** `pcm`: 16 kHz mono signed 16-bit little-endian samples. Resolves to the text, '' when nothing was understood. `names`: words to favour (agent and group names). */
+  transcribe(pcm: Uint8Array, opts?: { names?: string[] }): Promise<string>
 }
 
 export { PCM_MAX_BYTES } from '../../../shared/voice'

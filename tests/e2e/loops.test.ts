@@ -148,6 +148,7 @@ test('quit and reopen brings the loop back paused ("Paused on reopen"); it only 
     await details.getByRole('button', { name: 'Pause' }).click()
     await expect(status).toHaveText('paused: Paused by you')
     await details.getByRole('button', { name: 'Remove' }).click()
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Remove' }).click() // it asks first
     await expect(status).toHaveText('off')
     await clean(page, errors)
   } finally {

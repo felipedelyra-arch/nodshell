@@ -1,15 +1,20 @@
-import { session, WebContentsView, type BrowserWindow, type Session, type WebContents } from 'electron'
-import { WEBTILES_MAX } from '../../shared/webtile'
-import { cleanTitle, isAllowedWebUrl, mayNavigate, shownAddress, viewBounds, WebTileError } from '../domain/webtile'
+import { session, View, WebContentsView, type BrowserWindow, type Session, type WebContents } from 'electron'
+import { PAGE_ZOOM, WEBTILES_MAX, type Box, type PageWidth } from '../../shared/webtile'
+import { cleanTitle, goneReason, goneText, isAllowedWebUrl, mayNavigate, NOT_RESPONDING, pushFailure, type Failure, shownAddress, viewBounds, WebTileError } from '../domain/webtile'
 
 /** In memory only (no "persist:" prefix): nothing a page stores outlives the app. Shared by the tiles, never by the app window. */
 const TILE_PARTITION = 'webtiles'
 const tileContents = new WeakSet<WebContents>()
+/** The last failures of pages and helper processes, in memory only. */
+let failures: Failure[] = []
+export const recordFailure = (f: Omit<Failure, 'at'>): void => void (failures = pushFailure(failures, { at: Date.now(), ...f }))
+export const recentFailures = (): readonly Failure[] => failures
+export const exitCodeOf = (d: { exitCode: number }): number | null => (Number.isInteger(d.exitCode) ? d.exitCode : null)
 /** A tile's page: never an owner of terminals, never the app window, never a caller of the app's API. */
 export const isTileContents = (wc: WebContents | null | undefined): boolean => !!wc && tileContents.has(wc)
 
-export type TileState = { id: string; title: string; address: string; loading: boolean; error: string | null }
-export type Placement = { id: string; x: number; y: number; width: number; height: number; zoom: number; visible: boolean }
+export type TileState = { id: string; title: string; address: string; loading: boolean; error: string | null; canGoBack: boolean; canGoForward: boolean }
+export type Placement = { id: string; x: number; y: number; width: number; height: number; free: Box; zoom: number; visible: boolean; pageWidth: PageWidth | null }
 export type TileHooks = {
   /** the title, address, loading state or error of a tile changed (already cleaned) */
   state(ownerId: number, s: TileState): void
@@ -24,6 +29,8 @@ type Tile = {
   ownerId: number
   workspaceId: string
   win: BrowserWindow
+  /** the page's frame in the window: sized to the visible part of the body, it clips the page (and its clicks) to that part */
+  clip: View
   view: WebContentsView
   url: string
   title: string
@@ -33,6 +40,8 @@ type Tile = {
   /** the user has not chosen the page (a click in it, or Enter on its tile): if it takes the keyboard focus (Electron focuses a page as it loads), the focus goes back to the app */
   keepAppFocus: boolean
   zoom: number
+  /** the viewport preset: the page lays out at this many CSS px (null = as wide as the body) */
+  pageWidth: PageWidth | null
 }
 
 /** The owner window's own page, unless the window is going away. */
@@ -46,7 +55,6 @@ const resolveUrl = (to: string, base: string): string | null => {
   }
 }
 
-const ZOOM = { min: 0.25, max: 5 }
 const FOCUS_CHECK_MS = 60
 
 /**
@@ -103,12 +111,12 @@ export class WebTileManager {
   }
 
   /** What is saved of each tile of the window: where it belongs and the address it is at (an allowed one). */
-  list(ownerId: number): { id: string; workspaceId: string; url: string }[] {
-    return [...this.tiles.values()].filter((t) => t.ownerId === ownerId).map(({ id, workspaceId, url }) => ({ id, workspaceId, url }))
+  list(ownerId: number): { id: string; workspaceId: string; url: string; pageWidth: PageWidth | null }[] {
+    return [...this.tiles.values()].filter((t) => t.ownerId === ownerId).map(({ id, workspaceId, url, pageWidth }) => ({ id, workspaceId, url, pageWidth }))
   }
 
   /** `url` must already be normalized (normalizeAddress); it is checked again here. */
-  create(ownerId: number, win: BrowserWindow, workspaceId: string, url: string): TileState {
+  create(ownerId: number, win: BrowserWindow, workspaceId: string, url: string, pageWidth: PageWidth | null = null): TileState {
     if (!isAllowedWebUrl(url)) throw new WebTileError('Only http and https addresses are allowed')
     if (this.count(ownerId) >= WEBTILES_MAX) throw new WebTileError(`Web tile limit reached (${WEBTILES_MAX})`)
     this.session() // hardened before the first page of the partition exists
@@ -131,11 +139,13 @@ export class WebTileManager {
     })
     const wc = view.webContents
     tileContents.add(wc)
-    const t: Tile = { id: this.newId(), ownerId, workspaceId, win, view, url, title: '', loading: true, error: null, shown: false, keepAppFocus: true, zoom: 1 }
+    const clip = new View()
+    const t: Tile = { id: this.newId(), ownerId, workspaceId, win, clip, view, url, title: '', loading: true, error: null, shown: false, keepAppFocus: true, zoom: 1, pageWidth }
     this.tiles.set(t.id, t)
-    view.setVisible(false)
-    view.setBounds({ x: 0, y: 0, width: 0, height: 0 })
-    win.contentView.addChildView(view)
+    clip.setVisible(false)
+    clip.setBounds({ x: 0, y: 0, width: 0, height: 0 })
+    clip.addChildView(view)
+    win.contentView.addChildView(clip)
     this.wire(t)
     void this.cleared.then(() => (wc.isDestroyed() ? undefined : wc.loadURL(url))).catch(() => undefined) // a failure arrives as did-fail-load
     this.hooks.changed(ownerId)
@@ -192,7 +202,18 @@ export class WebTileManager {
     wc.on('did-fail-load', (_e, code, _desc, _url, isMainFrame) => {
       if (isMainFrame && code !== -3) this.update(t, { error: 'Could not load the page', loading: false }) // -3: aborted (a newer navigation)
     })
-    wc.on('render-process-gone', () => this.update(t, { error: 'The page stopped, reload it', loading: false }))
+    wc.on('render-process-gone', (_e, d) => {
+      const reason = goneReason(d.reason)
+      recordFailure({ kind: 'gone', reason, exitCode: exitCodeOf(d) })
+      this.update(t, { error: goneText(reason), loading: false })
+    })
+    wc.on('unresponsive', () => {
+      recordFailure({ kind: 'unresponsive', reason: 'other', exitCode: null })
+      if (t.error === null) this.update(t, { error: NOT_RESPONDING })
+    })
+    wc.on('responsive', () => {
+      if (t.error === NOT_RESPONDING) this.update(t, { error: null })
+    })
     wc.once('destroyed', () => this.forget(t))
   }
 
@@ -201,8 +222,13 @@ export class WebTileManager {
     this.push(t)
   }
 
+  private history(t: Tile): { canGoBack: boolean; canGoForward: boolean } {
+    const h = t.view.webContents.isDestroyed() ? null : t.view.webContents.navigationHistory
+    return { canGoBack: h?.canGoBack() ?? false, canGoForward: h?.canGoForward() ?? false }
+  }
+
   private state(t: Tile): TileState {
-    return { id: t.id, title: t.title, address: shownAddress(t.url), loading: t.loading, error: t.error }
+    return { id: t.id, title: t.title, address: shownAddress(t.url), loading: t.loading, error: t.error, ...this.history(t) }
   }
 
   private push(t: Tile): void {
@@ -228,6 +254,23 @@ export class WebTileManager {
     t.view.webContents.reload()
   }
 
+  /** A step in the page's history. Electron emits no will-navigate for history steps, so the target entry is checked here first. */
+  back(ownerId: number, id: string): void {
+    this.step(this.own(ownerId, id), -1)
+  }
+
+  forward(ownerId: number, id: string): void {
+    this.step(this.own(ownerId, id), 1)
+  }
+
+  private step(t: Tile, by: -1 | 1): void {
+    const h = t.view.webContents.navigationHistory
+    if (by < 0 ? !h.canGoBack() : !h.canGoForward()) return
+    if (!mayNavigate(h.getEntryAtIndex(h.getActiveIndex() + by)?.url ?? '', true)) return // refused: the page stays where it was
+    if (by < 0) h.goBack()
+    else h.goForward()
+  }
+
   /** Into the page, by keyboard; only while it is shown (keys never go to a page the user cannot see). */
   focus(ownerId: number, id: string): void {
     const t = this.own(ownerId, id)
@@ -237,19 +280,25 @@ export class WebTileManager {
   }
 
   /**
-   * Where the tile's body is in the window (CSS px of the app page) and the board zoom. Shown only when asked and fully inside the
-   * window; the renderer decides the rest (nothing over it, workspace active, inside the free part of the board).
+   * Where the tile's body and the board's free area are in the window (CSS px of the app page) and the board zoom. Shown only when
+   * asked and enough of the body is inside both the free area and the window, clipped to that part; the renderer decides the rest
+   * (nothing over it, workspace active).
    */
   place(ownerId: number, p: Placement): void {
     const t = this.own(ownerId, p.id)
     const app = appPage(t)
     if (!app) return
     const [width = 0, height = 0] = t.win.getContentSize()
-    const { bounds, inside } = viewBounds(p, app.getZoomFactor(), { width, height })
-    const show = p.visible && inside
+    const { clip, page, show: fits, zoom } = viewBounds(p, p.free, app.getZoomFactor(), { width, height }, p.pageWidth)
+    if (p.pageWidth !== t.pageWidth) {
+      t.pageWidth = p.pageWidth
+      this.hooks.changed(t.ownerId) // the preset is saved with the board
+    }
+    const show = p.visible && fits
     if (show) {
-      t.view.setBounds(bounds)
-      const z = Math.min(ZOOM.max, Math.max(ZOOM.min, p.zoom))
+      t.clip.setBounds(clip)
+      t.view.setBounds(page) // the whole body, so the page keeps its size (no reflow) as the clip changes
+      const z = Math.min(PAGE_ZOOM.max, Math.max(PAGE_ZOOM.min, zoom ?? p.zoom))
       if (z !== t.zoom) {
         t.zoom = z
         t.view.webContents.setZoomFactor(z)
@@ -258,7 +307,7 @@ export class WebTileManager {
     if (show === t.shown) return
     if (!show && t.view.webContents.isFocused()) appPage(t)?.focus() // keys never go on to a page that is hidden
     t.shown = show
-    t.view.setVisible(show)
+    t.clip.setVisible(show)
   }
 
   close(ownerId: number, id: string): void {
@@ -277,7 +326,7 @@ export class WebTileManager {
     for (const t of [...this.tiles.values()]) {
       if (t.ownerId !== ownerId) continue
       if (!t.view.webContents.isDestroyed() && t.view.webContents.isFocused()) appPage(t)?.focus()
-      t.view.setVisible(false)
+      t.clip.setVisible(false)
       this.destroy(t, false)
     }
   }
@@ -290,7 +339,7 @@ export class WebTileManager {
     try {
       // a page that has the keyboard hands it back to its window first: closing it must not leave the window without focus
       if (app && !wc.isDestroyed() && wc.isFocused()) app.focus()
-      if (app) t.win.contentView.removeChildView(t.view)
+      if (app) t.win.contentView.removeChildView(t.clip)
     } finally {
       if (!wc.isDestroyed()) wc.close()
     }

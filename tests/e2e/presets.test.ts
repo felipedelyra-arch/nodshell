@@ -1,7 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import { existsSync, statSync } from 'node:fs'
 import { basename, join } from 'node:path'
-import { alive, cleanupTemp, expectGone, launch, newConsole, typeIn } from './helpers'
+import { alive, cleanupTemp, expectGone, launch, newConsole, screenOf, typeIn } from './helpers'
 import { openRepo, setupRepo, spawnPreset } from './repo'
 
 test.afterEach(cleanupTemp)
@@ -21,7 +21,7 @@ test('top bar, workspace and branch label', async () => {
   try {
     const home = page.getByRole('button', { name: /Back to home/ })
     await expect(home).toHaveAttribute('aria-disabled', 'true')
-    await expect(home).toHaveAttribute('data-tip', 'Home arrives in a later phase')
+    await expect(home).toHaveAttribute('data-tip', 'Home is not available yet')
     await expect(page.getByRole('button', { name: 'Open folder' })).toBeVisible()
     await expect(page.getByRole('tab', { name: 'Workspace 1' })).toHaveAttribute('aria-selected', 'true')
     await expect(page.getByTestId('repo-badge')).toHaveCount(0) // no repository, no branch
@@ -84,7 +84,7 @@ test('Spawn 4 of Frontend: four grouped agents, label, collapse keeps terminals,
 
     // output typed before collapsing is still there after expanding; the processes live meanwhile
     await typeIn(page, 0, 'hello')
-    await expect(cards.nth(0).getByTestId('terminal-body')).toContainText('SUBMITTED 1')
+    await expect(screenOf(cards.nth(0))).toContainText('SUBMITTED 1')
     const collapse = page.getByRole('button', { name: 'Collapse FRONTEND' })
     await expect(collapse).toHaveAttribute('aria-expanded', 'true')
     await collapse.click()
@@ -95,8 +95,8 @@ test('Spawn 4 of Frontend: four grouped agents, label, collapse keeps terminals,
     for (const pid of pids) expect(alive(pid)).toBe(true)
     await page.getByRole('button', { name: 'Expand FRONTEND' }).click()
     for (const i of [0, 1, 2]) await expect(cards.nth(i)).toBeVisible()
-    await expect(cards.nth(0).getByTestId('terminal-body')).toContainText('FAKE CLAUDE READY')
-    await expect(cards.nth(0).getByTestId('terminal-body')).toContainText('SUBMITTED 1')
+    await expect(screenOf(cards.nth(0))).toContainText('FAKE CLAUDE READY')
+    await expect(screenOf(cards.nth(0))).toContainText('SUBMITTED 1')
 
     // closing the rest removes the group
     for (const n of names.slice(0, 3)) await page.getByRole('button', { name: `Close ${n}` }).click()
@@ -197,6 +197,7 @@ test('presets: create, validate, edit, delete, built-ins, focus handling, persis
     await expect(dialog().getByRole('alert')).toHaveText('A preset with that name already exists.')
 
     // Esc closes and returns the focus to the pill
+    await dialog().getByLabel('Name').focus() // a disabled Save (in flight) can have dropped the focus to the page
     await page.keyboard.press('Escape')
     await expect(dialog()).toHaveCount(0)
     await expect(pill).toBeFocused()
@@ -234,7 +235,7 @@ test('presets: create, validate, edit, delete, built-ins, focus handling, persis
     await dialog().getByRole('button', { name: 'Keep' }).click()
     await expect(item('Docs team')).toBeVisible()
     await dialog().getByRole('button', { name: 'Delete' }).click()
-    await dialog().getByRole('button', { name: 'Confirm delete' }).click()
+    await dialog().getByRole('alertdialog').getByRole('button', { name: 'Delete' }).click()
     await expect(item('Docs team')).toHaveCount(0)
     await expect(dialog().getByRole('list', { name: 'Preset list' }).getByRole('listitem')).toHaveCount(6)
 

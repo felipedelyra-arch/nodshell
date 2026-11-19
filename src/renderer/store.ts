@@ -1,7 +1,9 @@
 import { applyNodeChanges, type NodeChange, type Viewport } from '@xyflow/react'
 import { create } from 'zustand'
 import { MAX_LIVE, WORKSPACES_MAX } from '../shared/agent'
+import type { PageWidth } from '../shared/webtile'
 import { useAnnotations } from './annotations/store'
+import type { MemoryReport } from './chrome/memoryUsage'
 import type { ChannelOutput, EventPayload } from '../shared/ipc/channels'
 import { addSpawned, addSquad, boardNodes, cardNode as card, keepOnBoard, type BoardView, CARD_W, closableIds, endName, isTerminal, groupableIds, groupSize, inWorkspace, joinGroup, leaveGroup, nextSlot, raiseOnly, removeCard, setCollapsed, setPinned, TILE_W, webTileNode, type WebTileData, type AgentState, type AppNode, type FlowEdgeDto, type SourceEnd, type TargetEnd, type TerminalFlowNode } from './graph'
 
@@ -10,7 +12,7 @@ export type { AgentState, TerminalFlowNode }
 export const FIRING_MS = 1500
 export const LIT_MS = 1200
 export type LastMessage = ChannelOutput<'agent:lastMessage'>
-export type Toast = { text: string; tone: 'error' | 'info' }
+export type Toast = { text: string; tone: 'error' | 'info'; action?: { label: string; run: () => void }; low?: boolean }
 export type TaskSummary = EventPayload<'tasks:changed'>
 export type LoopDto = EventPayload<'loop:changed'>['loops'][number]
 export type HandoffDto = EventPayload<'handoff:changed'>['handoffs'][number]
@@ -38,6 +40,8 @@ type State = {
   setLiveLimit: (n: number) => void
   /** memory of the app and its terminals in bytes, 0 until main reports */
   memoryBytes: number
+  /** the last full report of main (per terminal and system), null until it arrives */
+  memory: MemoryReport | null
   /** bumped when new cards appear so the canvas can bring them into view */
   fitTick: number
   /** a saved board is coming back: starting agents or switching project waits */
@@ -92,7 +96,8 @@ type State = {
   ungroup: (groupId: string) => Promise<void>
   toggleGroup: (groupId: string, collapsed: boolean) => void
   sendPrompt: (ptyId: string, text: string) => Promise<boolean>
-  notify: (text: string, tone: Toast['tone']) => void
+  /** `low`: shown only when no toast is visible (never replaces a notice); any other notice replaces it at once */
+  notify: (text: string, tone: Toast['tone'], action?: Toast['action'], opts?: { low?: boolean }) => void
   closeNode: (ptyId: string) => Promise<void>
   togglePin: (ptyId: string) => void
   setMaximized: (ptyId: string | null) => void
@@ -104,7 +109,10 @@ type State = {
   /** resolves to an error message, or null when the tile is going there */
   navigateTile: (id: string, address: string) => Promise<string | null>
   reloadTile: (id: string) => Promise<void>
+  stepTile: (id: string, way: 'back' | 'forward') => Promise<void>
   closeTile: (id: string) => Promise<void>
+  /** a tile's viewport preset (null = Fit); main saves it with the board once the next placement carries it */
+  setTilePageWidth: (id: string, pageWidth: PageWidth | null) => void
   setTileState: (e: EventPayload<'webtile:changed'>) => void
   onNodesChange: (changes: NodeChange<AppNode>[]) => void
 }
@@ -129,11 +137,11 @@ const tileStates = new Map<string, EventPayload<'webtile:changed'>>()
 const TILE_STATES_MAX = 16
 const tileData = (id: string, d: WebTileData): WebTileData => {
   const e = tileStates.get(id)
-  return e ? { ...d, title: e.title, address: e.address, loading: e.loading, error: e.error } : d
+  return e ? { ...d, title: e.title, address: e.address, loading: e.loading, error: e.error, canGoBack: e.canGoBack, canGoForward: e.canGoForward } : d
 }
 type RestoredTiles = ChannelOutput<'board:restore'>['webTiles']
 const tileNodes = (ts: RestoredTiles): AppNode[] =>
-  ts.map((t) => webTileNode(t.id, tileData(t.id, { title: t.title, address: t.address, loading: true, error: null, workspaceId: t.workspaceId }), { x: t.x, y: t.y }, { w: t.w, h: t.h }))
+  ts.map((t) => webTileNode(t.id, tileData(t.id, { title: t.title, address: t.address, loading: true, error: null, workspaceId: t.workspaceId, pageWidth: t.pageWidth }), { x: t.x, y: t.y }, { w: t.w, h: t.h }))
 // the id is also the board's key in main (a preset's group is per workspace) and never repeats, so a saved viewport never lands on a later workspace
 const freshWorkspace = (n: number): Workspace => ({ id: crypto.randomUUID(), name: `Workspace ${n}` })
 
@@ -169,10 +177,11 @@ export function remoteMessage(e: unknown, fallback: string): string {
 }
 
 export const useCanvas = create<State>((set, get) => {
-  const show = (text: string, tone: Toast['tone']) => {
+  const show = (text: string, tone: Toast['tone'], action?: Toast['action'], opts?: { low?: boolean }) => {
+    if (opts?.low && get().toast) return // dropped, not queued: terminal output must never hide an app notice
     clearTimeout(toastTimer)
-    set({ toast: { text, tone } })
-    toastTimer = setTimeout(() => set({ toast: null }), tone === 'error' ? 8000 : 6000)
+    set({ toast: { text, tone, action, low: opts?.low } })
+    toastTimer = setTimeout(() => set({ toast: null }), tone === 'error' ? 8000 : action ? 20_000 : 6000)
   }
 
   const first = freshWorkspace(1)
@@ -215,6 +224,7 @@ export const useCanvas = create<State>((set, get) => {
     spawnCount: 4,
     liveLimit: MAX_LIVE,
     memoryBytes: 0,
+    memory: null,
     setLiveLimit: (n) => set((s) => ({ liveLimit: n, spawnCount: Math.min(s.spawnCount, n) })),
     fitTick: 0,
     restoring: false,
@@ -530,11 +540,21 @@ export const useCanvas = create<State>((set, get) => {
       }
     },
 
+    stepTile: async (id, way) => {
+      try {
+        await window.api.invoke(way === 'back' ? 'webtile:back' : 'webtile:forward', { id })
+      } catch (e) {
+        show(remoteMessage(e, 'Could not change page.'), 'error')
+      }
+    },
+
     closeTile: async (id) => {
       await window.api.invoke('webtile:close', { id }).catch(() => undefined) // already gone is fine
       tileStates.delete(id)
-      set((s) => ({ nodes: s.nodes.filter((n) => n.id !== id) }))
+      set((s) => ({ nodes: s.nodes.filter((n) => n.id !== id), maximized: s.maximized === id ? null : s.maximized }))
     },
+
+    setTilePageWidth: (id, pageWidth) => set((s) => ({ nodes: s.nodes.map((n) => (n.id === id && n.type === 'webtile' ? { ...n, data: { ...n.data, pageWidth } } : n)) })),
 
     setTileState: (e) => {
       tileStates.delete(e.id)

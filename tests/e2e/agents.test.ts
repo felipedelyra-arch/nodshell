@@ -229,7 +229,7 @@ test('live status from hooks, Last message, live badge, token check, prompt gati
     await card2.getByRole('button', { name: n1, exact: true }).click()
     const dlg2 = page.getByRole('dialog', { name: `Details for ${n1}` })
     await expect(dlg2.getByTestId('last-source')).toHaveAttribute('data-source', 'scrape')
-    await expect(dlg2.getByTestId('last-source')).toContainText('Best effort · scraped from the terminal')
+    await expect(dlg2.getByTestId('last-source')).toContainText('Read from the terminal · may be incomplete')
     await expect(dlg2.getByTestId('last-text')).toContainText('ANSWER: FINAL ANSWER to NOTRANSCRIPT please')
     expect(await dlg2.getByTestId('last-text').textContent()).not.toContain(String.fromCharCode(27))
     await page.keyboard.press('Escape')

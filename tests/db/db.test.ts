@@ -30,7 +30,7 @@ const base = { name: 'Mine', role: 'mine', adapter: 'claude' as const, model: nu
 describe('database', () => {
   it('migrates an empty file, is idempotent, and seeds the built-ins once', () => {
     const names = () => new SqlitePresetRepo(db).list().map((p) => p.name)
-    expect(db.pragma('user_version', { simple: true })).toBe(7)
+    expect(db.pragma('user_version', { simple: true })).toBe(8)
     expect(names()).toEqual(BUILTIN_PRESETS.map((b) => b.name))
     migrate(db)
     migrate(db)
@@ -56,7 +56,7 @@ describe('database', () => {
     db.pragma('user_version = 1')
     dropF8(db)
     migrate(db)
-    expect(db.pragma('user_version', { simple: true })).toBe(7)
+    expect(db.pragma('user_version', { simple: true })).toBe(8)
     expect(orch().systemPrompt).toBe(ORCHESTRATOR_PROMPT)
     expect(r.get('u')!.systemPrompt).toBe(ORCHESTRATOR_PROMPT_V1)
     // the user had changed the built-in prompt: kept

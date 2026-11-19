@@ -8,7 +8,7 @@ export type CommandState = { agents: CommandAgent[]; groups: CommandGroup[]; squ
 export type CommandScope = { workspaceId: string; squadId?: string }
 export type Target = { id: string; name: string }
 export type Refusal = { name: string; reason: string }
-export type Route = { targets: Target[]; text: string; refused: Refusal[] }
+export type Route = { targets: Target[]; text: string; refused: Refusal[]; /** the group an `@group` named, for the preview */ group?: string }
 
 const NAMES_SHOWN = 8
 
@@ -55,7 +55,7 @@ export function routeCommand(input: string, scope: CommandScope, st: CommandStat
   const agent = agents.find((a) => a.name.toLowerCase() === best.toLowerCase())
   const members = agent ? [agent] : groups.filter((g) => g.name.toLowerCase() === best.toLowerCase()).flatMap((g) => g.memberIds.flatMap((m) => byId.get(m) ?? []))
   const targets = [...new Map(members.map((a) => [a.id, { id: a.id, name: a.name }])).values()]
-  return { targets, text: body, refused: [] }
+  return { targets, text: body, refused: [], ...(agent ? {} : { group: best }) }
 }
 
 /** Why a command cannot be typed into this agent now (the manual prompt's rules, but stricter while starting), or null. */
@@ -74,18 +74,40 @@ export type CommandDeps = {
   submit(ownerId: number, id: string, text: string): Promise<void>
 }
 
-/** SendCommand: route, then deliver each target separately; one refusal never stops the others. */
-export async function sendCommand(d: CommandDeps, ownerId: number, scope: CommandScope, text: string): Promise<{ delivered: string[]; refused: Refusal[] }> {
-  const st = d.state(ownerId)
+/** The one decision the send and the preview share: the route, who may receive it now (`ok`) and who is refused and why. Pure. */
+export function planCommand(st: CommandState, paused: boolean, scope: CommandScope, text: string): { route: Route; ok: Target[]; refused: Refusal[] } {
   const route = routeCommand(text, scope, st)
   const refused = [...route.refused]
+  const ok: Target[] = []
+  for (const t of route.targets) {
+    const a = st.agents.find((x) => x.id === t.id)
+    const why = paused ? 'is paused' : a ? promptRefusal(a) : 'is not running'
+    if (why) refused.push({ name: t.name, reason: why })
+    else ok.push(t)
+  }
+  return { route, ok, refused }
+}
+
+const PREVIEW_MAX = 40
+
+/** Who would get this command now, for the renderer to show before Enter. Same plan as the send, no side effect (never calls `submit`). */
+export function previewCommand(d: Pick<CommandDeps, 'state' | 'paused'>, ownerId: number, scope: CommandScope, text: string): { targets: { name: string }[]; refused: Refusal[]; group?: string } {
+  const st = d.state(ownerId)
+  const { route, ok, refused } = planCommand(st, d.paused(ownerId), scope, text)
+  const label = (t: Target) => (st.agents.find((a) => a.id === t.id)?.role === 'orchestrator' ? 'Orchestrator' : t.name).slice(0, 60)
+  return {
+    targets: ok.slice(0, PREVIEW_MAX).map((t) => ({ name: label(t) })),
+    refused: refused.slice(0, PREVIEW_MAX).map((r) => ({ name: r.name.slice(0, 60), reason: r.reason.slice(0, 300) })),
+    ...(route.group && ok.length > 0 ? { group: route.group.slice(0, 60) } : {}),
+  }
+}
+
+/** SendCommand: route, then deliver each target separately; one refusal never stops the others. */
+export async function sendCommand(d: CommandDeps, ownerId: number, scope: CommandScope, text: string): Promise<{ delivered: string[]; refused: Refusal[] }> {
+  const { route, ok, refused } = planCommand(d.state(ownerId), d.paused(ownerId), scope, text)
   const delivered: string[] = []
-  const paused = d.paused(ownerId)
   await Promise.all(
-    route.targets.map(async (t) => {
-      const a = st.agents.find((x) => x.id === t.id)
-      const why = paused ? 'is paused' : a ? promptRefusal(a) : 'is not running'
-      if (why) return void refused.push({ name: t.name, reason: why })
+    ok.map(async (t) => {
       try {
         await d.submit(ownerId, t.id, route.text)
         delivered.push(t.name)
@@ -95,5 +117,5 @@ export async function sendCommand(d: CommandDeps, ownerId: number, scope: Comman
     }),
   )
   // bounded: these strings reach a toast (and the IPC schema)
-  return { delivered: route.targets.map((t) => t.name).filter((n) => delivered.includes(n)), refused: refused.map((r) => ({ name: r.name.slice(0, 60), reason: r.reason.slice(0, 300) })) }
+  return { delivered: ok.map((t) => t.name).filter((n) => delivered.includes(n)), refused: refused.map((r) => ({ name: r.name.slice(0, 60), reason: r.reason.slice(0, 300) })) }
 }

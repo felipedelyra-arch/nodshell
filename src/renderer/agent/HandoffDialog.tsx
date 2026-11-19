@@ -49,16 +49,16 @@ export function HandoffDialog({ handoff }: { handoff: HandoffDto }) {
         spellCheck={false}
         onChange={(e) => setText(e.target.value)}
       />
-      <p id={sizeId} data-testid="handoff-size" className={`m-0 mt-2 text-right font-mono text-xs ${over ? 'text-[#ffa47e]' : 'text-muted'}`}>
+      <p id={sizeId} data-testid="handoff-size" className={`m-0 mt-2 text-right font-mono text-xs ${over ? 'text-danger-text' : 'text-muted'}`}>
         {text.length} / {BRIEFING_MAX} characters{over ? ', too long' : ''}
       </p>
       {error && (
-        <p role="alert" className="text-xs text-[#ffa47e]">
+        <p role="alert" className="text-xs text-danger-text">
           {error}
         </p>
       )}
       <div className="mt-2 flex items-center gap-2">
-        <button type="button" className="btn-accent" disabled={busy || over || !text.trim()} onClick={() => void send()}>
+        <button type="button" className="btn-accent" aria-busy={busy || undefined} disabled={over || !text.trim()} onClick={() => void send()}>
           Send
         </button>
         <button type="button" className="btn-quiet" disabled={busy} onClick={cancel}>
